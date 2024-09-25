@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"net"
 	pb "raft/protos"
@@ -23,7 +24,7 @@ type peers struct {
 }
 
 // Initialise the peers and return an instance
-func initPeers() *peers {
+func InitPeers() *peers {
 	return &peers{
 		peerMap: make(map[string]*peer),
 	}
@@ -43,8 +44,14 @@ func (p *peers) getPeerClient(address string) (pb.RaftClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error establishing connection to a Raft Peer: %w", err)
 	}
-	p.peerMap[address].conn = conn
-	p.peerMap[address].client = pb.NewRaftClient(conn)
+
+	// Create a new peer and add it to the map
+	newPeer := &peer{
+		conn:   conn,
+		client: pb.NewRaftClient(conn),
+	}
+	p.peerMap[address] = newPeer
+
 	return p.peerMap[address].client, nil
 }
 
@@ -59,28 +66,29 @@ func (p *peers) closeAllPeerConn() {
 	}
 }
 
-type node struct {
+type Node struct {
+	pb.UnimplementedRaftServer
+
 	address  net.Addr     // Address of this server to make RPC calls
 	mu       sync.RWMutex // Mutex to ensure concurrency
 	server   *grpc.Server // gRPC server for nodes
 	peerList *peers       // Struct to manage the peers
 	running  bool         // Is the server running?
-	pb.UnimplementedRaftServer
 }
 
-func initNode(addr string) (*node, error) {
+func InitNode(addr string) (*Node, error) {
 	netAddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("error resolving TCP address : %w", err)
 	}
-	return &node{
+	return &Node{
 		address:  netAddr,
-		peerList: initPeers(),
+		peerList: InitPeers(),
 	}, nil
 }
 
 // Start the node and receive RPCs
-func (n *node) Start() error {
+func (n *Node) Start() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -102,7 +110,8 @@ func (n *node) Start() error {
 	return nil
 }
 
-func (n *node) Shutdown() error {
+// Shutdown the RPC server
+func (n *Node) Shutdown() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	defer n.peerList.closeAllPeerConn()
@@ -127,4 +136,28 @@ func (n *node) Shutdown() error {
 	}
 
 	return nil
+}
+
+// RPCs for testing purposes
+
+func (n *Node) SendHello(ctx context.Context,
+	request *pb.Hello) (*pb.Bye, error) {
+	message := fmt.Sprintf("Hello, %s!", request.GetServername())
+	return &pb.Bye{
+		Clientname: message,
+	}, nil
+}
+
+func (n *Node) SendHelloHelper(address string, request *pb.Hello) (*pb.Bye, error) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	client, err := n.peerList.getPeerClient(address)
+	if err != nil {
+		return &pb.Bye{}, err
+	}
+	res, err := client.SendHello(context.Background(), request)
+	if err != nil {
+		return &pb.Bye{}, err
+	}
+	return res, nil
 }
