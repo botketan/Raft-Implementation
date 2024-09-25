@@ -1,7 +1,6 @@
 package node
 
 import (
-	"context"
 	"fmt"
 	"net"
 	pb "raft/protos"
@@ -136,28 +135,4 @@ func (n *Node) Shutdown() error {
 	}
 
 	return nil
-}
-
-// RPCs for testing purposes
-
-func (n *Node) SendHello(ctx context.Context,
-	request *pb.Hello) (*pb.Bye, error) {
-	message := fmt.Sprintf("Hello, %s!", request.GetServername())
-	return &pb.Bye{
-		Clientname: message,
-	}, nil
-}
-
-func (n *Node) SendHelloHelper(address string, request *pb.Hello) (*pb.Bye, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-	client, err := n.peerList.getPeerClient(address)
-	if err != nil {
-		return &pb.Bye{}, err
-	}
-	res, err := client.SendHello(context.Background(), request)
-	if err != nil {
-		return &pb.Bye{}, err
-	}
-	return res, nil
 }
