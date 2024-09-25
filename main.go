@@ -1,10 +1,11 @@
-package raft
+package main
 
 import (
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	mongoDb "raft/mongoDb"
 	"sync"
 )
 
@@ -20,7 +21,7 @@ func getRoot(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "Normal Request\n")
 }
 
-func main() {
+func serverTest() {
 	port := os.Args[1]
 	fmt.Println(port)
 	http.HandleFunc("/", getRoot)
@@ -29,4 +30,8 @@ func main() {
 		fmt.Println("Error in ListenAndServe: ", err)
 		return
 	}
+}
+
+func main() {
+	mongoDb.TestConnect()
 }
