@@ -65,6 +65,7 @@ type RaftNode struct {
 	currentTerm uint64 // Default value is 0
 	address     string
 	votedFor    string // Default value is "None"
+	config      *Configuration
 
 	// Volatile states
 	commitIndex   uint64
@@ -74,8 +75,7 @@ type RaftNode struct {
 	lastContact   time.Time                // To store the last time some leader has contacted - used for handling timeouts
 	followersList map[string]followerState // To map address to other follower state
 
-	node   *Node
-	config *Configuration
+	node *Node
 	// TODO: Log struct
 	// log Log
 }
@@ -90,6 +90,7 @@ func InitRaftNode(id in, address string) (*RaftNode, error) {
 		id:          id,
 		node:        node,
 		currentTerm: 0,
+		state:       Follower,
 	}
 	return raft, nil
 }
