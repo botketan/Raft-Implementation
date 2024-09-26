@@ -21,6 +21,25 @@ func TestConnect() error {
 	if err != nil {
 		return fmt.Errorf("error while connecting to mongoDB: %w", err)
 	}
-	fmt.Print(insertResult)
+	fmt.Println(insertResult)
+	NodelogCollection := db.Collection("NodeLog")
+	newNode := NodeLog{
+		Port: "0000",
+		LogEntries: []LogEntry{
+			{
+				Index: 2,
+				Term:  2,
+			},
+			{
+				Index: 1,
+				Term:  1,
+			},
+		},
+	}
+	insertResult, err = NodelogCollection.InsertOne(context.TODO(), newNode)
+	if err != nil {
+		return fmt.Errorf("error while connecting to mongoDB: %w", err)
+	}
+	fmt.Println(insertResult)
 	return nil
 }
