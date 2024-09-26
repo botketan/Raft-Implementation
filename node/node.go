@@ -73,6 +73,10 @@ type Node struct {
 	server   *grpc.Server // gRPC server for nodes
 	peerList *peers       // Struct to manage the peers
 	running  bool         // Is the server running?
+
+	// RPC Handlers (to be registered in main raft node)
+	appendEntriesHandler func(*pb.AppendEntriesRequest, *pb.AppendEntriesResponse) error
+	requestVoteHandler   func(*pb.RequestVoteRequest, *pb.RequestVoteResponse) error
 }
 
 func InitNode(addr string) (*Node, error) {
@@ -84,6 +88,19 @@ func InitNode(addr string) (*Node, error) {
 		address:  netAddr,
 		peerList: InitPeers(),
 	}, nil
+}
+
+// Registers the handlers for RPCs
+func (n *Node) registerAppendEntriesHandler(
+	handler func(*pb.AppendEntriesRequest, *pb.AppendEntriesResponse) error,
+) {
+	n.appendEntriesHandler = handler
+}
+
+func (n *Node) registerRequestVoteHandler(
+	handler func(*pb.RequestVoteRequest, *pb.RequestVoteResponse) error,
+) {
+	n.requestVoteHandler = handler
 }
 
 // Start the node and receive RPCs
