@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	pb "raft/protos"
 	"sync"
 	"time"
 )
@@ -44,7 +45,7 @@ func (s State) Stringify() string {
 // Volatile State stored by leaders regarding other peers
 type followerState struct {
 	nextIndex  uint64
-	matchIndex uint64
+	matchIndex int64
 }
 
 // This interface is to be implemented by `RaftNode`
@@ -72,12 +73,12 @@ type RaftNode struct {
 	id          string
 	currentTerm uint64 // Default value is 0
 	address     string
-	votedFor    string // Default value is "None"
+	votedFor    string // Default value is ""
 	config      *Configuration
 
 	// Volatile states
-	commitIndex   uint64
-	lastApplied   uint64
+	commitIndex   int64
+	lastApplied   int64
 	leaderId      string
 	state         State
 	lastContact   time.Time                 // To store the last time some leader has contacted - used for handling timeouts
@@ -100,6 +101,8 @@ func InitRaftNode(ID string, address string) (*RaftNode, error) {
 		currentTerm:   0,
 		state:         Follower,
 		followersList: make(map[string]*followerState),
+		commitIndex:   -1,
+		votedFor:      "",
 	}
 
 	raft.applyCond = sync.NewCond(&raft.mu)
@@ -167,25 +170,104 @@ func (r *RaftNode) startElection() {
 	}
 
 	if r.state == Follower || r.state == Candidate {
-		// Becomes a candidate
-		r.state = Candidate
-		r.currentTerm++
-		r.votedFor = r.id
-		// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
-		log.Println("node %w transitioned to candidate state")
+		r.becomeCandidate()
 	}
 
+	votesReceived := 1
 	for id, addr := range r.config.members {
 		if id != r.id {
-			go r.SendRequestVoteRPC(addr)
+			go r.sendRequestVote(id, addr, &votesReceived)
 		}
 	}
 
 }
 
-// Send the Request Vote RPC to an address
-func (r *RaftNode) SendRequestVoteRPC(addr string) {
+// Send the Request Vote RPC to an node (id, address) and process it
+func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
+	req := &pb.RequestVoteRequest{
+		CandidateId: r.id,
+		Term:        int64(r.currentTerm),
+		// TODO Update these from the log once log is made
+		LastLogIndex: rand.Int63n(5) + 1,
+		LastLogTerm:  rand.Int63n(6) + 1,
+	}
+
+	r.mu.Unlock()
+	resp, err := r.node.SendRequestVoteRPC(addr, req)
+	r.mu.Lock()
+
+	// Send only when you are a candidate and alive
+	if err != nil || r.state == Dead || r.state != Candidate {
+		return
+	}
+
+	// Handle the case when the node has already started election in some other thread
+	if r.currentTerm > uint64(req.GetTerm()) {
+		return
+	}
+
+	if resp.GetVoteGranted() {
+		*votesRcd++
+	}
+
+	// The peer has a higher term - switch to follower
+	if resp.GetTerm() > req.GetTerm() {
+		r.becomeFollower(id, uint64(resp.GetTerm()))
+		return
+	}
+
+	if r.hasMajority(*votesRcd) && r.state == Candidate {
+		r.becomeLeader()
+	}
+}
+
+// Send append entries to a node (id, address) and process it
+func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Dont send if r is not the leader
+	if r.state != Leader {
+		return
+	}
+}
+
+func (r *RaftNode) becomeCandidate() {
+	r.state = Candidate
+	r.currentTerm++
+	r.votedFor = r.id
+	// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
+	log.Println("node %w transitioned to candidate state")
+}
+
+func (r *RaftNode) becomeFollower(leaderID string, term uint64) {
+	r.state = Follower
+	r.leaderId = leaderID
+	r.votedFor = ""
+	r.currentTerm = term
+	// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
+	log.Println("node %w transitioned to follower state")
+}
+
+func (r *RaftNode) becomeLeader() {
+	r.state = Leader
+	r.leaderId = r.id
+	for _, follower := range r.followersList {
+		// TODO update to length of the log after log is made
+		follower.nextIndex = 0
+		follower.matchIndex = -1
+	}
+	// TODO: Send append entires to all nodes
+	log.Println("node %w transitioned to leader state")
+}
+
+// returns true if majority has been reached for the input number of votes
+// should be called inside a thread safe func
+func (r *RaftNode) hasMajority(count int) bool {
+	return count > len(r.config.members)
 }
 
 // To be done after calling InitServer
@@ -206,7 +288,10 @@ func (r *RaftNode) start() error {
 	r.state = Follower
 	r.lastContact = time.Now()
 
-	// TODO add the wgs and start the loops
+	// TODO add the remaining
+	r.wg.Add(2)
+	go r.electionClock()
+	go r.electionLoop()
 
 	if err := r.node.Start(); err != nil {
 		return err

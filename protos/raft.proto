@@ -28,7 +28,6 @@ message RequestVoteRequest {
     int64 term           = 2;
     int64 last_log_index = 3;
     int64 last_log_term  = 4;
-    bool   prevote        = 5;
 }
 
 message RequestVoteResponse {

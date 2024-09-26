@@ -7,8 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // Struct to store the information about the peer and the gRPC clients
@@ -101,6 +104,38 @@ func (n *Node) registerRequestVoteHandler(
 	handler func(*pb.RequestVoteRequest, *pb.RequestVoteResponse) error,
 ) {
 	n.requestVoteHandler = handler
+}
+
+// Wrapper functions to send RPCs
+func (n *Node) SendRequestVoteRPC(address string, req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	if !n.running {
+		return &pb.RequestVoteResponse{}, fmt.Errorf("node closed, can't make RequestVoteRPCs")
+	}
+
+	client, err := n.peerList.getPeerClient(address)
+	if err != nil {
+		return &pb.RequestVoteResponse{}, err
+	}
+
+	resp, err := client.RequestVote(context.Background(), req)
+	if err != nil {
+		return &pb.RequestVoteResponse{}, err
+	}
+	return resp, nil
+}
+
+// Wrapper function over handlers
+// Assumes that the handler is thread safe
+func (n *Node) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {
+	resp := &pb.RequestVoteResponse{}
+	err := n.requestVoteHandler(req, resp)
+	if err != nil {
+		return &pb.RequestVoteResponse{}, status.Error(codes.Unavailable, err.Error())
+	}
+	return resp, nil
 }
 
 // Start the node and receive RPCs
