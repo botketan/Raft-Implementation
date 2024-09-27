@@ -112,7 +112,7 @@ func (n *Node) SendRequestVoteRPC(address string, req *pb.RequestVoteRequest) (*
 	defer n.mu.RUnlock()
 
 	if !n.running {
-		return &pb.RequestVoteResponse{}, fmt.Errorf("node closed, can't make RequestVoteRPCs")
+		return &pb.RequestVoteResponse{}, fmt.Errorf("node closed, can't make RequestVoteRPC")
 	}
 
 	client, err := n.peerList.getPeerClient(address)
@@ -127,6 +127,26 @@ func (n *Node) SendRequestVoteRPC(address string, req *pb.RequestVoteRequest) (*
 	return resp, nil
 }
 
+func (n *Node) SendAppendEntriesRPC(address string, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	if !n.running {
+		return &pb.AppendEntriesResponse{}, fmt.Errorf("node closed, can't make AppendEntriesRPC")
+	}
+
+	client, err := n.peerList.getPeerClient(address)
+	if err != nil {
+		return &pb.AppendEntriesResponse{}, err
+	}
+
+	resp, err := client.AppendEntries(context.Background(), req)
+	if err != nil {
+		return &pb.AppendEntriesResponse{}, err
+	}
+	return resp, nil
+}
+
 // Wrapper function over handlers
 // Assumes that the handler is thread safe
 func (n *Node) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {
@@ -134,6 +154,15 @@ func (n *Node) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*pb
 	err := n.requestVoteHandler(req, resp)
 	if err != nil {
 		return &pb.RequestVoteResponse{}, status.Error(codes.Unavailable, err.Error())
+	}
+	return resp, nil
+}
+
+func (n *Node) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
+	resp := &pb.AppendEntriesResponse{}
+	err := n.appendEntriesHandler(req, resp)
+	if err != nil {
+		return &pb.AppendEntriesResponse{}, status.Error(codes.Unavailable, err.Error())
 	}
 	return resp, nil
 }

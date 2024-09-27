@@ -82,7 +82,7 @@ type RaftNode struct {
 	leaderId      string
 	state         State
 	lastContact   time.Time                 // To store the last time some leader has contacted - used for handling timeouts
-	followersList map[string]*followerState // To map address to other follower state
+	followersList map[string]*followerState // To map id to other follower state
 
 	node *Node
 	// TODO: Log struct
@@ -219,7 +219,7 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
 		return
 	}
 
-	if r.hasMajority(*votesRcd) && r.state == Candidate {
+	if r.state == Candidate && r.hasMajority(*votesRcd) {
 		r.becomeLeader()
 	}
 }
@@ -233,6 +233,32 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	if r.state != Leader {
 		return
 	}
+
+	peer := r.followersList[id]
+	nextIndex := peer.nextIndex
+	prevLogIndex := nextIndex - 1
+	prevLogTerm := -1
+	if prevLogIndex >= 0 {
+		// TODO Update based on last term in that index
+		prevLogTerm = 1
+	}
+	// TODO update with log[nextIndex:]
+	// logEntriesToSend := []int{}
+
+	req := &pb.AppendEntriesRequest{
+		LeaderId:     r.id,
+		Term:         int64(r.currentTerm),
+		PrevLogIndex: int64(prevLogIndex),
+		PrevLogTerm:  int64(prevLogTerm),
+		// TODO: Uncomment after logEntriesToSend is properly defined
+		//Entries: logEntriesToSend,
+	}
+
+	r.mu.Unlock()
+	// TODO Make this handler in the other file
+	resp, err := r.node.SendAppendEntriesRPC(addr, req)
+	r.mu.Lock()
+
 }
 
 func (r *RaftNode) becomeCandidate() {
@@ -260,7 +286,13 @@ func (r *RaftNode) becomeLeader() {
 		follower.nextIndex = 0
 		follower.matchIndex = -1
 	}
-	// TODO: Send append entires to all nodes
+
+	responsesRcd := 1
+	for id, addr := range r.config.members {
+		if id != r.id {
+			go r.sendAppendEntries(id, addr, &responsesRcd)
+		}
+	}
 	log.Println("node %w transitioned to leader state")
 }
 
@@ -288,7 +320,7 @@ func (r *RaftNode) start() error {
 	r.state = Follower
 	r.lastContact = time.Now()
 
-	// TODO add the remaining
+	// TODO add the remaining loops
 	r.wg.Add(2)
 	go r.electionClock()
 	go r.electionLoop()
