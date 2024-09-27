@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	mongodb "raft/mongodb"
 	pb "raft/protos"
 	"sync"
 	"time"
@@ -266,6 +267,10 @@ func (r *RaftNode) becomeCandidate() {
 	r.currentTerm++
 	r.votedFor = r.id
 	// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
+	err := mongodb.Voted(r.id, r.votedFor, r.currentTerm)
+	if err != nil {
+		//TODO: Handle this error in Log
+	}
 	log.Println("node %w transitioned to candidate state")
 }
 
@@ -275,6 +280,10 @@ func (r *RaftNode) becomeFollower(leaderID string, term uint64) {
 	r.votedFor = ""
 	r.currentTerm = term
 	// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
+	err := mongodb.Voted(r.id, r.votedFor, r.currentTerm)
+	if err != nil {
+		//TODO: Handle this error in Log
+	}
 	log.Println("node %w transitioned to follower state")
 }
 
