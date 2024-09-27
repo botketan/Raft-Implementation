@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math/rand"
@@ -60,6 +61,16 @@ type Configuration struct {
 	members map[string]string
 }
 
+type LogEntry struct {
+	Index int64
+	Term  int64
+	Data  []byte
+}
+
+type Log struct {
+	entries []LogEntry
+}
+
 type RaftNode struct {
 	// For concurrency
 	mu sync.Mutex
@@ -83,11 +94,10 @@ type RaftNode struct {
 	leaderId      string
 	state         State
 	lastContact   time.Time                 // To store the last time some leader has contacted - used for handling timeouts
-	followersList map[string]*followerState // To map id to other follower state
+	followersList map[string]*followerState // To map address to other follower state
 
 	node *Node
-	// TODO: Log struct
-	// log Log
+	log Log
 }
 
 func InitRaftNode(ID string, address string) (*RaftNode, error) {
@@ -188,12 +198,19 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Fetch last log entry details
+	lastLogIndex := int64(-1)
+	lastLogTerm := int64(0)
+	if len(r.log.entries) > 0 {
+		lastLogIndex = r.log.entries[len(r.log.entries)-1].Index
+		lastLogTerm = r.log.entries[len(r.log.entries)-1].Term
+	}
+
 	req := &pb.RequestVoteRequest{
 		CandidateId: r.id,
 		Term:        int64(r.currentTerm),
-		// TODO Update these from the log once log is made
-		LastLogIndex: rand.Int63n(5) + 1,
-		LastLogTerm:  rand.Int63n(6) + 1,
+		LastLogIndex: lastLogIndex,
+		LastLogTerm:  lastLogTerm,
 	}
 
 	r.mu.Unlock()
@@ -220,8 +237,24 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
 		return
 	}
 
-	if r.state == Candidate && r.hasMajority(*votesRcd) {
+	if r.hasMajority(*votesRcd) && r.state == Candidate {
 		r.becomeLeader()
+	}
+}
+
+// Send AppendEntries RPC to all followers
+func (r *RaftNode) sendAppendEntriesToAll() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state != Leader {
+		return
+	}
+
+	for id, addr := range r.config.members {
+		if id != r.id {
+			go r.sendAppendEntries(id, addr, new(int))
+		}
 	}
 }
 
@@ -235,42 +268,114 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 		return
 	}
 
-	peer := r.followersList[id]
-	nextIndex := peer.nextIndex
-	prevLogIndex := nextIndex - 1
-	prevLogTerm := -1
-	if prevLogIndex >= 0 {
-		// TODO Update based on last term in that index
-		prevLogTerm = 1
-	}
-	// TODO update with log[nextIndex:]
-	// logEntriesToSend := []int{}
+	prevLogIndex := r.log.entries[len(r.log.entries)-1].Index
+	prevLogTerm := r.log.entries[len(r.log.entries)-1].Term
+	entries := r.getUnsentEntries(id)
 
 	req := &pb.AppendEntriesRequest{
 		LeaderId:     r.id,
 		Term:         int64(r.currentTerm),
-		PrevLogIndex: int64(prevLogIndex),
-		PrevLogTerm:  int64(prevLogTerm),
-		// TODO: Uncomment after logEntriesToSend is properly defined
-		//Entries: logEntriesToSend,
+		LeaderCommit: r.commitIndex,
+		PrevLogIndex: prevLogIndex,
+		PrevLogTerm:  prevLogTerm,
+		Entries:      convertToProtoEntries(entries),
 	}
 
 	r.mu.Unlock()
-	// TODO Make this handler in the other file
 	resp, err := r.node.SendAppendEntriesRPC(addr, req)
 	r.mu.Lock()
 
+	if err != nil || r.state != Leader {
+		return
+	}
+
+	if resp.Success {
+		*respRcd++
+		r.followersList[id].nextIndex = prevLogIndex + int64(len(entries)) + 1
+		r.followersList[id].matchIndex = prevLogIndex + int64(len(entries))
+	} else if resp.Term > req.Term {
+		r.becomeFollower("", uint64(resp.Term))
+		return
+	} else {
+		r.followersList[id].nextIndex--
+	}
+
+	if r.hasMajority(*respRcd) {
+		r.log.CommitTo(prevLogIndex + int64(len(entries)))
+	} else {
+		// Send the append entries again
+		go r.sendAppendEntries(id, addr, respRcd)
+	}
+}
+
+// Appends new log entries to the log on receiving a request from the leader
+func (r *RaftNode) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// If the leader's term is less than our current term, reject the request
+	if req.Term < int64(r.currentTerm) {
+		return &pb.AppendEntriesResponse{
+			Term:    int64(r.currentTerm),
+			Success: false,
+		}, nil
+	}
+
+	// If the leader's term is greater, we step down as a follower
+	if req.Term > int64(r.currentTerm) {
+		r.becomeFollower(req.LeaderId, uint64(req.Term))
+	}
+
+	// Reset the timeout since we've received a valid append from the leader
+	r.lastContact = time.Now()
+
+	// Check if we have the previous log entry at PrevLogIndex and PrevLogTerm
+	if req.PrevLogIndex > 0 {
+		if len(r.log.entries) == 0 || req.PrevLogIndex > int64(len(r.log.entries)) || r.log.entries[req.PrevLogIndex-1].Term != req.PrevLogTerm {
+			// Log inconsistency detected, reject the append
+			return &pb.AppendEntriesResponse{
+				Term:    int64(r.currentTerm),
+				Success: false,
+			}, nil
+		}
+	}
+
+	// Append new entries to the log if any
+	for _, entry := range req.Entries {
+		// If there is already an entry at this index, replace it (log overwrite protection)
+		if entry.Index <= int64(len(r.log.entries)) {
+			r.log.entries[entry.Index-1] = LogEntry{
+				Index: entry.Index,
+				Term:  entry.Term,
+				Data:  entry.Data,
+			}
+		} else {
+			// Append new log entries
+			r.log.entries = append(r.log.entries, LogEntry{
+				Index: entry.Index,
+				Term:  entry.Term,
+				Data:  entry.Data,
+			})
+		}
+	}
+
+	// Update commit index if leaderCommit is greater than our commitIndex
+	if req.LeaderCommit > r.commitIndex {
+		r.commitIndex = min(req.LeaderCommit, int64(len(r.log.entries)))
+		r.commitCond.Broadcast()
+	}
+
+	return &pb.AppendEntriesResponse{
+		Term:    int64(r.currentTerm),
+		Success: true,
+	}, nil
 }
 
 func (r *RaftNode) becomeCandidate() {
 	r.state = Candidate
 	r.currentTerm++
 	r.votedFor = r.id
-	// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
-	err := mongodb.Voted(r.id, r.votedFor, r.currentTerm)
-	if err != nil {
-		//TODO: Handle this error in Log
-	}
+	saveStateToDB()
 	log.Println("node %w transitioned to candidate state")
 }
 
@@ -279,11 +384,7 @@ func (r *RaftNode) becomeFollower(leaderID string, term uint64) {
 	r.leaderId = leaderID
 	r.votedFor = ""
 	r.currentTerm = term
-	// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
-	err := mongodb.Voted(r.id, r.votedFor, r.currentTerm)
-	if err != nil {
-		//TODO: Handle this error in Log
-	}
+	saveStateToDB()
 	log.Println("node %w transitioned to follower state")
 }
 
@@ -291,17 +392,10 @@ func (r *RaftNode) becomeLeader() {
 	r.state = Leader
 	r.leaderId = r.id
 	for _, follower := range r.followersList {
-		// TODO update to length of the log after log is made
-		follower.nextIndex = 0
+		follower.nextIndex = int64(len(r.log.entries))
 		follower.matchIndex = -1
 	}
-
-	responsesRcd := 1
-	for id, addr := range r.config.members {
-		if id != r.id {
-			go r.sendAppendEntries(id, addr, &responsesRcd)
-		}
-	}
+	sendAppendEntriesToAll()
 	log.Println("node %w transitioned to leader state")
 }
 
@@ -315,7 +409,7 @@ func (r *RaftNode) hasMajority(count int) bool {
 func (r *RaftNode) start() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
+	
 	if err := r.restoreStates(); err != nil {
 		return err
 	}
@@ -329,7 +423,7 @@ func (r *RaftNode) start() error {
 	r.state = Follower
 	r.lastContact = time.Now()
 
-	// TODO add the remaining loops
+	// TODO add the remaining
 	r.wg.Add(2)
 	go r.electionClock()
 	go r.electionLoop()
@@ -340,4 +434,43 @@ func (r *RaftNode) start() error {
 	log.Println("Server with ID: %w is started", r.id)
 
 	return nil
+}
+
+// saveStateToDB saves the current state of the node to the database
+func (r *RaftNode) saveStateToDB() error {
+	err := mongodb.Voted(r.id, r.votedFor, r.currentTerm)
+	if err != nil {
+		return fmt.Errorf("error while saving state to database: %w", err)
+	}
+	return nil
+}
+
+// getUnsentEntries returns the unsent entries for a follower
+func (r *RaftNode) getUnsentEntries(id string) []LogEntry {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	nextIndex := r.followersList[id].nextIndex
+	return r.log.entries[nextIndex:]
+}
+
+// convertToProtoEntries converts log entries to protobuf format for AppendEntriesRequest
+func convertToProtoEntries(entries []LogEntry) []*pb.LogEntry {
+	var protoEntries []*pb.LogEntry
+	for _, entry := range entries {
+		protoEntries = append(protoEntries, &pb.LogEntry{
+			Index: entry.Index,
+			Term:  entry.Term,
+			Data:  entry.Data,
+		})
+	}
+	return protoEntries
+}
+
+// min is a utility function to get the minimum of two int64 values
+func min(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
 }
