@@ -259,6 +259,18 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	resp, err := r.node.SendAppendEntriesRPC(addr, req)
 	r.mu.Lock()
 
+	if r.state != Leader || err != nil {
+		return
+	}
+
+	// Become a follower if the reply term is greater
+	if resp.GetTerm() > int64(r.currentTerm) {
+		r.becomeFollower(id, uint64(resp.GetTerm()))
+		return
+	}
+
+	*respRcd++
+
 }
 
 func (r *RaftNode) becomeCandidate() {
@@ -266,7 +278,7 @@ func (r *RaftNode) becomeCandidate() {
 	r.currentTerm++
 	r.votedFor = r.id
 	// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
-	log.Println("node %w transitioned to candidate state")
+	log.Println("node %w transitioned to candidate state", r.id)
 }
 
 func (r *RaftNode) becomeFollower(leaderID string, term uint64) {
@@ -275,7 +287,7 @@ func (r *RaftNode) becomeFollower(leaderID string, term uint64) {
 	r.votedFor = ""
 	r.currentTerm = term
 	// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
-	log.Println("node %w transitioned to follower state")
+	log.Println("node %w transitioned to follower state", r.id)
 }
 
 func (r *RaftNode) becomeLeader() {
@@ -293,7 +305,7 @@ func (r *RaftNode) becomeLeader() {
 			go r.sendAppendEntries(id, addr, &responsesRcd)
 		}
 	}
-	log.Println("node %w transitioned to leader state")
+	log.Println("node %w transitioned to leader state", r.id)
 }
 
 // returns true if majority has been reached for the input number of votes
