@@ -28,7 +28,7 @@ const (
 	heartbeatTimeout = time.Duration(50 * time.Millisecond)
 )
 
-func (s State) Stringify() string {
+func (s State) String() string {
 	switch s {
 	case Follower:
 		return "Follower"
@@ -225,6 +225,63 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
 	}
 }
 
+// Handler to send RequestVoteResponse - to be registered
+func (r *RaftNode) RequestVoteHandler(req *pb.RequestVoteRequest, resp *pb.RequestVoteResponse) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state == Dead {
+		return fmt.Errorf("node is in dead state, can't reply to RequestVote")
+	}
+
+	log.Println("Received RequestVote RPC from candiate: %w", req.GetCandidateId())
+
+	resp.Term = int64(r.currentTerm)
+	resp.VoteGranted = false
+
+	// If some disruptive servers keep sending requests and we keep getting RPCs but election hasn't been timedout yet, ignore the RPCS
+	if time.Since(r.lastContact) < electionTimeout {
+		log.Println("rejecting RequestVote RPC: node has a leader %w already known", r.leaderId)
+		return nil
+	}
+
+	// Reject outdated terms
+	if req.GetTerm() < int64(r.currentTerm) {
+		log.Println("rejecting RequestVote RPC: node's term is %w, req's term is %w", r.currentTerm, req.GetTerm())
+		return nil
+	}
+
+	// become follower if my term is outdated
+	if req.GetTerm() > int64(r.currentTerm) {
+		r.becomeFollower(req.GetCandidateId(), uint64(req.GetTerm()))
+		resp.Term = req.GetTerm()
+	}
+
+	// Reject if I have already voted to someone else
+	if r.votedFor != "" && r.votedFor != req.GetCandidateId() {
+		log.Println("rejecting RequestVote RPC: already voted for %w", r.votedFor)
+		return nil
+	}
+
+	// TODO: Check and complete log Condition for granting vote
+
+	resp.VoteGranted = true
+	r.lastContact = time.Now()
+	r.votedFor = req.GetCandidateId()
+
+	if err := mongodb.Voted(r.id, r.votedFor, r.currentTerm); err != nil {
+		// TODO: Handle using Logger
+	}
+
+	log.Println(
+		"requestVote RPC successful: votedFor = %w, term = %w",
+		req.GetCandidateId(),
+		r.currentTerm,
+	)
+
+	return nil
+}
+
 // Send append entries to a node (id, address) and process it
 func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	r.mu.Lock()
@@ -271,18 +328,19 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 
 	*respRcd++
 
+	// TODO: Complete it
+
 }
 
 func (r *RaftNode) becomeCandidate() {
 	r.state = Candidate
 	r.currentTerm++
 	r.votedFor = r.id
-	// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
 	err := mongodb.Voted(r.id, r.votedFor, r.currentTerm)
 	if err != nil {
 		//TODO: Handle this error in Log
 	}
-	log.Println("node %w transitioned to candidate state")
+	log.Println("node %w transitioned to candidate state", r.id)
 }
 
 func (r *RaftNode) becomeFollower(leaderID string, term uint64) {
@@ -290,12 +348,11 @@ func (r *RaftNode) becomeFollower(leaderID string, term uint64) {
 	r.leaderId = leaderID
 	r.votedFor = ""
 	r.currentTerm = term
-	// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
 	err := mongodb.Voted(r.id, r.votedFor, r.currentTerm)
 	if err != nil {
 		//TODO: Handle this error in Log
 	}
-	log.Println("node %w transitioned to follower state")
+	log.Println("node %w transitioned to follower state", r.id)
 }
 
 func (r *RaftNode) becomeLeader() {
@@ -330,7 +387,8 @@ func (r *RaftNode) start() error {
 		return err
 	}
 
-	//TODO Register the RPCs
+	//TODO Register the Append Entries RPC
+	r.node.registerRequestVoteHandler(r.RequestVoteHandler)
 
 	// Initalise the followers list
 	for id := range r.config.members {
