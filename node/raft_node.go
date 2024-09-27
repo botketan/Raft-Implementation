@@ -94,7 +94,7 @@ type RaftNode struct {
 	leaderId      string
 	state         State
 	lastContact   time.Time                 // To store the last time some leader has contacted - used for handling timeouts
-	followersList map[string]*followerState // To map address to other follower state
+	followersList map[string]*followerState // To map id to other follower state
 
 	node *Node
 	log Log
@@ -237,24 +237,8 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
 		return
 	}
 
-	if r.hasMajority(*votesRcd) && r.state == Candidate {
+	if r.state == Candidate && r.hasMajority(*votesRcd) {
 		r.becomeLeader()
-	}
-}
-
-// Send AppendEntries RPC to all followers
-func (r *RaftNode) sendAppendEntriesToAll() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.state != Leader {
-		return
-	}
-
-	for id, addr := range r.config.members {
-		if id != r.id {
-			go r.sendAppendEntries(id, addr, new(int))
-		}
 	}
 }
 
@@ -268,9 +252,14 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 		return
 	}
 
-	prevLogIndex := r.log.entries[len(r.log.entries)-1].Index
-	prevLogTerm := r.log.entries[len(r.log.entries)-1].Term
-	entries := r.getUnsentEntries(id)
+	peer := r.followersList[id]
+	nextIndex := peer.nextIndex
+	prevLogIndex := nextIndex - 1
+	prevLogTerm := -1
+	if prevLogIndex >= 0 {
+		prevLogTerm = r.log.entries[prevLogIndex].Term
+	}
+	entries := r.log.entries[nextIndex:]
 
 	req := &pb.AppendEntriesRequest{
 		LeaderId:     r.id,
@@ -284,28 +273,6 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	r.mu.Unlock()
 	resp, err := r.node.SendAppendEntriesRPC(addr, req)
 	r.mu.Lock()
-
-	if err != nil || r.state != Leader {
-		return
-	}
-
-	if resp.Success {
-		*respRcd++
-		r.followersList[id].nextIndex = prevLogIndex + int64(len(entries)) + 1
-		r.followersList[id].matchIndex = prevLogIndex + int64(len(entries))
-	} else if resp.Term > req.Term {
-		r.becomeFollower("", uint64(resp.Term))
-		return
-	} else {
-		r.followersList[id].nextIndex--
-	}
-
-	if r.hasMajority(*respRcd) {
-		r.log.CommitTo(prevLogIndex + int64(len(entries)))
-	} else {
-		// Send the append entries again
-		go r.sendAppendEntries(id, addr, respRcd)
-	}
 }
 
 // Appends new log entries to the log on receiving a request from the leader
@@ -395,7 +362,13 @@ func (r *RaftNode) becomeLeader() {
 		follower.nextIndex = int64(len(r.log.entries))
 		follower.matchIndex = -1
 	}
-	sendAppendEntriesToAll()
+	
+	responsesRcd := 1
+	for id, addr := range r.config.members {
+		if id != r.id {
+			go r.sendAppendEntries(id, addr, &responsesRcd)
+		}
+	}
 	log.Println("node %w transitioned to leader state")
 }
 
@@ -423,7 +396,7 @@ func (r *RaftNode) start() error {
 	r.state = Follower
 	r.lastContact = time.Now()
 
-	// TODO add the remaining
+	// TODO add the remaining loops
 	r.wg.Add(2)
 	go r.electionClock()
 	go r.electionLoop()
@@ -443,15 +416,6 @@ func (r *RaftNode) saveStateToDB() error {
 		return fmt.Errorf("error while saving state to database: %w", err)
 	}
 	return nil
-}
-
-// getUnsentEntries returns the unsent entries for a follower
-func (r *RaftNode) getUnsentEntries(id string) []LogEntry {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	nextIndex := r.followersList[id].nextIndex
-	return r.log.entries[nextIndex:]
 }
 
 // convertToProtoEntries converts log entries to protobuf format for AppendEntriesRequest
