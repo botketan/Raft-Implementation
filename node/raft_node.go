@@ -256,7 +256,6 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	}
 
 	r.mu.Unlock()
-	// TODO Make this handler in the other file
 	resp, err := r.node.SendAppendEntriesRPC(addr, req)
 	r.mu.Lock()
 
