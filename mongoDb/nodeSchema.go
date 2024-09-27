@@ -4,10 +4,18 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+type Configuration struct {
+	members map[string]string `bson:"members,omitempty"`
+}
+
 type NodeLog struct {
-	ID         primitive.ObjectID `bson:"_id,omitempty"`
-	Port       string             `bson:"port,omitempty"`
-	LogEntries []LogEntry         `bson:"log_entry,omitempty"`
+	ID          primitive.ObjectID `bson:"_id,omitempty"`
+	NodeId      string             `bson:"node_id,omitempty"`
+	CurrentTerm uint64             `bson:"current_term,omitempty,default:0"`
+	Address     string             `bson:"address,omitempty"`
+	VotedFor    string             `bson:"voted_for,omitempty,deafult:''"`
+	Config      Configuration      `bson:"config,omitempty"`
+	LogEntries  []LogEntry         `bson:"log_entry,omitempty"`
 }
 
 type LogEntry struct {
@@ -16,9 +24,6 @@ type LogEntry struct {
 
 	// The term of the log entry.
 	Term uint64 `bson:"term,omitempty"`
-
-	// The offset of the log entry.
-	Offset int64 `bson:"offset,omitempty"`
 
 	// The data of the log entry.
 	Data []byte `bson:"data,omitempty"`

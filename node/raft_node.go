@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	mongodb "raft/mongoDb"
 	pb "raft/protos"
 	"sync"
 	"time"
@@ -255,7 +256,6 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	}
 
 	r.mu.Unlock()
-	// TODO Make this handler in the other file
 	resp, err := r.node.SendAppendEntriesRPC(addr, req)
 	r.mu.Lock()
 
@@ -278,7 +278,11 @@ func (r *RaftNode) becomeCandidate() {
 	r.currentTerm++
 	r.votedFor = r.id
 	// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
-	log.Println("node %w transitioned to candidate state", r.id)
+	err := mongodb.Voted(r.id, r.votedFor, r.currentTerm)
+	if err != nil {
+		//TODO: Handle this error in Log
+	}
+	log.Println("node %w transitioned to candidate state")
 }
 
 func (r *RaftNode) becomeFollower(leaderID string, term uint64) {
@@ -287,11 +291,14 @@ func (r *RaftNode) becomeFollower(leaderID string, term uint64) {
 	r.votedFor = ""
 	r.currentTerm = term
 	// TODO Write the currentTerm and votedFor in the mongodb, maybe create a function for it
-	log.Println("node %w transitioned to follower state", r.id)
+	err := mongodb.Voted(r.id, r.votedFor, r.currentTerm)
+	if err != nil {
+		//TODO: Handle this error in Log
+	}
+	log.Println("node %w transitioned to follower state")
 }
 
 func (r *RaftNode) becomeLeader() {
-	r.state = Leader
 	r.leaderId = r.id
 	for _, follower := range r.followersList {
 		// TODO update to length of the log after log is made

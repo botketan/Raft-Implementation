@@ -24,7 +24,6 @@ func TestConnect() error {
 	fmt.Println(insertResult)
 	NodelogCollection := db.Collection("NodeLog")
 	newNode := NodeLog{
-		Port: "0000",
 		LogEntries: []LogEntry{
 			{
 				Index: 2,
