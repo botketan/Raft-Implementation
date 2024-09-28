@@ -156,6 +156,14 @@ func (r *RaftNode) restoreStates() error {
 	r.address = NodeLog.Address
 	r.votedFor = NodeLog.VotedFor
 	r.config.members = NodeLog.Config.Members
+	r.log.entries = []LogEntry{}
+	for _, entry := range NodeLog.LogEntries {
+		r.log.entries = append(r.log.entries, LogEntry{
+			Index: entry.Index,
+			Term:  entry.Term,
+			Data:  entry.Data,
+		})
+	}
 	return nil
 }
 
