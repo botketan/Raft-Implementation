@@ -315,15 +315,9 @@ func (r *RaftNode) RequestVoteHandler(req *pb.RequestVoteRequest, resp *pb.Reque
 		return nil
 	}
 
-	// TODO: Check and complete log Condition for granting vote
-	if r.commitIndex > req.LastLogIndex {
-		log.Println("rejecting RequestVote RPC: current log: %w is more updated than the candidate's log :%w", r.commitIndex, req.LastLogIndex)
-		return nil
-	}
-
 	sz := len(r.log.entries)
 	if sz > 0 {
-		if r.log.entries[sz-1].Term > req.Term || (r.log.entries[sz-1].Term == req.Term && r.log.entries[sz-1].Index > req.LastLogIndex) {
+		if r.log.entries[sz-1].Term > req.LastLogTerm || (r.log.entries[sz-1].Term == req.LastLogTerm && r.log.entries[sz-1].Index > req.LastLogIndex) {
 			log.Println("rejecting RequestVote RPC: current log: %w is more updated than the candidate's log :%w", r.log.entries[sz-1].Term, req.LastLogTerm)
 			return nil
 
