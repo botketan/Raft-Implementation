@@ -46,7 +46,7 @@ func (s State) String() string {
 
 // Volatile State stored by leaders regarding other peers
 type followerState struct {
-	nextIndex  uint64
+	nextIndex  int64
 	matchIndex int64
 }
 
@@ -83,7 +83,7 @@ type RaftNode struct {
 
 	// Persistent states to be stored
 	id          string
-	currentTerm uint64 // Default value is 0
+	currentTerm int64 // Default value is 0
 	address     string
 	votedFor    string // Default value is ""
 	config      *Configuration
@@ -97,7 +97,7 @@ type RaftNode struct {
 	followersList map[string]*followerState // To map id to other follower state
 
 	node *Node
-	log Log
+	log  Log
 }
 
 func InitRaftNode(ID string, address string) (*RaftNode, error) {
@@ -207,8 +207,8 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
 	}
 
 	req := &pb.RequestVoteRequest{
-		CandidateId: r.id,
-		Term:        int64(r.currentTerm),
+		CandidateId:  r.id,
+		Term:         int64(r.currentTerm),
 		LastLogIndex: lastLogIndex,
 		LastLogTerm:  lastLogTerm,
 	}
@@ -223,7 +223,7 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
 	}
 
 	// Handle the case when the node has already started election in some other thread
-	if r.currentTerm > uint64(req.GetTerm()) {
+	if r.currentTerm > int64(req.GetTerm()) {
 		return
 	}
 
@@ -233,7 +233,7 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
 
 	// The peer has a higher term - switch to follower
 	if resp.GetTerm() > req.GetTerm() {
-		r.becomeFollower(id, uint64(resp.GetTerm()))
+		r.becomeFollower(id, int64(resp.GetTerm()))
 		return
 	}
 
@@ -270,7 +270,7 @@ func (r *RaftNode) RequestVoteHandler(req *pb.RequestVoteRequest, resp *pb.Reque
 
 	// become follower if my term is outdated
 	if req.GetTerm() > int64(r.currentTerm) {
-		r.becomeFollower(req.GetCandidateId(), uint64(req.GetTerm()))
+		r.becomeFollower(req.GetCandidateId(), int64(req.GetTerm()))
 		resp.Term = req.GetTerm()
 	}
 
@@ -312,7 +312,7 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	peer := r.followersList[id]
 	nextIndex := peer.nextIndex
 	prevLogIndex := nextIndex - 1
-	prevLogTerm := -1
+	var prevLogTerm int64 = -1
 	if prevLogIndex >= 0 {
 		prevLogTerm = r.log.entries[prevLogIndex].Term
 	}
@@ -336,8 +336,8 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	}
 
 	// Become a follower if the reply term is greater
-	if resp.GetTerm() > int64(r.currentTerm) {
-		r.becomeFollower(id, uint64(resp.GetTerm()))
+	if resp.GetTerm() > r.currentTerm {
+		r.becomeFollower(id, resp.GetTerm())
 		return
 	}
 
@@ -353,16 +353,16 @@ func (r *RaftNode) AppendEntries(ctx context.Context, req *pb.AppendEntriesReque
 	defer r.mu.Unlock()
 
 	// If the leader's term is less than our current term, reject the request
-	if req.Term < int64(r.currentTerm) {
+	if req.Term < r.currentTerm {
 		return &pb.AppendEntriesResponse{
-			Term:    int64(r.currentTerm),
+			Term:    r.currentTerm,
 			Success: false,
 		}, nil
 	}
 
 	// If the leader's term is greater, we step down as a follower
-	if req.Term > int64(r.currentTerm) {
-		r.becomeFollower(req.LeaderId, uint64(req.Term))
+	if req.Term > r.currentTerm {
+		r.becomeFollower(req.LeaderId, req.Term)
 	}
 
 	// Reset the timeout since we've received a valid append from the leader
@@ -408,23 +408,23 @@ func (r *RaftNode) AppendEntries(ctx context.Context, req *pb.AppendEntriesReque
 		Term:    int64(r.currentTerm),
 		Success: true,
 	}, nil
-  
+
 }
 
 func (r *RaftNode) becomeCandidate() {
 	r.state = Candidate
 	r.currentTerm++
 	r.votedFor = r.id
-	saveStateToDB()
+	r.saveStateToDB()
 	log.Println("node %w transitioned to candidate state", r.id)
 }
 
-func (r *RaftNode) becomeFollower(leaderID string, term uint64) {
+func (r *RaftNode) becomeFollower(leaderID string, term int64) {
 	r.state = Follower
 	r.leaderId = leaderID
 	r.votedFor = ""
 	r.currentTerm = term
-	saveStateToDB()
+	r.saveStateToDB()
 	log.Println("node %w transitioned to follower state", r.id)
 }
 
@@ -434,7 +434,7 @@ func (r *RaftNode) becomeLeader() {
 		follower.nextIndex = int64(len(r.log.entries))
 		follower.matchIndex = -1
 	}
-	
+
 	responsesRcd := 1
 	for id, addr := range r.config.members {
 		if id != r.id {
@@ -454,7 +454,7 @@ func (r *RaftNode) hasMajority(count int) bool {
 func (r *RaftNode) start() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	if err := r.restoreStates(); err != nil {
 		return err
 	}

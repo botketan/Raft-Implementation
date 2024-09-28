@@ -11,7 +11,7 @@ type Configuration struct {
 type NodeLog struct {
 	ID          primitive.ObjectID `bson:"_id,omitempty"`
 	NodeId      string             `bson:"node_id,omitempty"`
-	CurrentTerm uint64             `bson:"current_term,omitempty,default:0"`
+	CurrentTerm int64              `bson:"current_term,omitempty,default:0"`
 	Address     string             `bson:"address,omitempty"`
 	VotedFor    string             `bson:"voted_for,omitempty,deafult:''"`
 	Config      Configuration      `bson:"config,omitempty"`
@@ -20,14 +20,14 @@ type NodeLog struct {
 
 type LogEntry struct {
 	// The index of the log entry.
-	Index uint64 `bson:"index,omitempty"`
+	Index int64 `bson:"index,omitempty"`
 
 	// The term of the log entry.
-	Term uint64 `bson:"term,omitempty"`
+	Term int64 `bson:"term,omitempty"`
 
 	// The data of the log entry.
 	Data []byte `bson:"data,omitempty"`
 
 	// The type of the log entry.
-	EntryType uint32 `bson:"entry_type,omitempty"`
+	EntryType int32 `bson:"entry_type,omitempty"`
 }

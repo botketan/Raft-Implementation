@@ -7,7 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-func Voted(NodeId string, VotedFor string, CurrentTerm uint64) error {
+func Voted(NodeId string, VotedFor string, CurrentTerm int64) error {
 	client, err := connect()
 	if err != nil {
 		return fmt.Errorf("error while connecting to mongoDB: %w", err)
