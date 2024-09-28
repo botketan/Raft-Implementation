@@ -5,7 +5,7 @@ import (
 )
 
 type Configuration struct {
-	members map[string]string `bson:"members,omitempty"`
+	Members map[string]string `bson:"members,omitempty"`
 }
 
 type NodeLog struct {

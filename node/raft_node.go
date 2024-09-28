@@ -140,7 +140,23 @@ func InitRaftNode(ID string, address string) (*RaftNode, error) {
 }
 
 func (r *RaftNode) restoreStates() error {
-	return fmt.Errorf("not yet implemented!!")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	client, err := mongodb.Connect()
+	if err != nil {
+		return err
+	}
+	r.mongoClient = client
+	NodeLog, err := mongodb.GetNodeLog(*r.mongoClient, r.id)
+	if err != nil {
+		return err
+	}
+	r.currentTerm = NodeLog.CurrentTerm
+	r.address = NodeLog.Address
+	r.votedFor = NodeLog.VotedFor
+	r.config.members = NodeLog.Config.Members
+	return nil
 }
 
 // Gets a random timeout between [min, max]
