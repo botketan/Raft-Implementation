@@ -1,7 +1,6 @@
 package node
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"math/rand"
@@ -286,9 +285,7 @@ func (r *RaftNode) RequestVoteHandler(req *pb.RequestVoteRequest, resp *pb.Reque
 	r.lastContact = time.Now()
 	r.votedFor = req.GetCandidateId()
 
-	if err := mongodb.Voted(r.id, r.votedFor, r.currentTerm); err != nil {
-		// TODO: Handle using Logger
-	}
+	r.saveStateToDB()
 
 	log.Println(
 		"requestVote RPC successful: votedFor = %w, term = %w",
@@ -348,16 +345,15 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 }
 
 // Appends new log entries to the log on receiving a request from the leader
-func (r *RaftNode) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
+func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.AppendEntriesResponse) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	// If the leader's term is less than our current term, reject the request
 	if req.Term < r.currentTerm {
-		return &pb.AppendEntriesResponse{
-			Term:    r.currentTerm,
-			Success: false,
-		}, nil
+		resp.Term = r.currentTerm
+		resp.Success = false
+		return nil
 	}
 
 	// If the leader's term is greater, we step down as a follower
@@ -372,10 +368,9 @@ func (r *RaftNode) AppendEntries(ctx context.Context, req *pb.AppendEntriesReque
 	if req.PrevLogIndex > 0 {
 		if len(r.log.entries) == 0 || req.PrevLogIndex > int64(len(r.log.entries)) || r.log.entries[req.PrevLogIndex-1].Term != req.PrevLogTerm {
 			// Log inconsistency detected, reject the append
-			return &pb.AppendEntriesResponse{
-				Term:    int64(r.currentTerm),
-				Success: false,
-			}, nil
+			resp.Term = r.currentTerm
+			resp.Success = false
+			return nil
 		}
 	}
 
@@ -404,11 +399,9 @@ func (r *RaftNode) AppendEntries(ctx context.Context, req *pb.AppendEntriesReque
 		r.commitCond.Broadcast()
 	}
 
-	return &pb.AppendEntriesResponse{
-		Term:    int64(r.currentTerm),
-		Success: true,
-	}, nil
-
+	resp.Term = r.currentTerm
+	resp.Success = true
+	return nil
 }
 
 func (r *RaftNode) becomeCandidate() {
@@ -459,8 +452,8 @@ func (r *RaftNode) start() error {
 		return err
 	}
 
-	//TODO Register the Append Entries RPC
 	r.node.registerRequestVoteHandler(r.RequestVoteHandler)
+	r.node.registerAppendEntriesHandler(r.AppendEntriesHandler)
 
 	// Initalise the followers list
 	for id := range r.config.members {
