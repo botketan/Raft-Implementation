@@ -6,7 +6,7 @@ import (
 )
 
 func TestConnect() error {
-	client, err := connect()
+	client, err := Connect()
 	if err != nil {
 		return fmt.Errorf("error while connecting to mongoDB: %w", err)
 	}

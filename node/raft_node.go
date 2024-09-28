@@ -8,6 +8,8 @@ import (
 	pb "raft/protos"
 	"sync"
 	"time"
+
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 /*
@@ -97,6 +99,9 @@ type RaftNode struct {
 
 	node *Node
 	log  Log
+
+	//MongoDB Connection
+	mongoClient *mongo.Client
 }
 
 func InitRaftNode(ID string, address string) (*RaftNode, error) {
@@ -118,6 +123,13 @@ func InitRaftNode(ID string, address string) (*RaftNode, error) {
 	raft.applyCond = sync.NewCond(&raft.mu)
 	raft.commitCond = sync.NewCond(&raft.mu)
 	raft.electionCond = sync.NewCond(&raft.mu)
+
+	//MongoDb Connection
+	raft.mongoClient, err = mongodb.Connect()
+
+	if err != nil {
+		return nil, err
+	}
 
 	err = raft.restoreStates()
 	if err != nil {
@@ -477,7 +489,7 @@ func (r *RaftNode) start() error {
 
 // saveStateToDB saves the current state of the node to the database
 func (r *RaftNode) saveStateToDB() error {
-	err := mongodb.Voted(r.id, r.votedFor, r.currentTerm)
+	err := mongodb.Voted(*r.mongoClient, r.id, r.votedFor, r.currentTerm)
 	if err != nil {
 		return fmt.Errorf("error while saving state to database: %w", err)
 	}

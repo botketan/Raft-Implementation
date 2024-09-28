@@ -10,7 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func connect() (*mongo.Client, error) {
+func Connect() (*mongo.Client, error) {
 	err := godotenv.Load()
 	if err != nil {
 		return nil, err
