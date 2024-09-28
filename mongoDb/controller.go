@@ -5,6 +5,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func Voted(client mongo.Client, NodeId string, VotedFor string, CurrentTerm int64) error {
@@ -12,7 +13,9 @@ func Voted(client mongo.Client, NodeId string, VotedFor string, CurrentTerm int6
 	Collection := db.Collection("NodeLog")
 	_, err := Collection.UpdateOne(context.TODO(),
 		bson.M{"node_id": NodeId},
-		bson.M{"$set": bson.M{"voted_for": VotedFor, "current_term": CurrentTerm}})
+		bson.M{"$set": bson.M{"voted_for": VotedFor, "current_term": CurrentTerm}},
+		options.Update().SetUpsert(true))
+
 	return err
 }
 

@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	"log"
 	"math/rand"
 	mongodb "raft/mongoDb"
 	pb "raft/protos"
@@ -59,7 +58,7 @@ type RaftInterface interface {
 
 type Configuration struct {
 	// Node ID -> address map
-	members map[string]string
+	Members map[string]string
 }
 
 type LogEntry struct {
@@ -102,9 +101,12 @@ type RaftNode struct {
 
 	//MongoDB Connection
 	mongoClient *mongo.Client
+
+	// logger
+	logger Logger
 }
 
-func InitRaftNode(ID string, address string) (*RaftNode, error) {
+func InitRaftNode(ID string, address string, config *Configuration) (*RaftNode, error) {
 	node, err := InitNode(address)
 	if err != nil {
 		return nil, err
@@ -117,6 +119,7 @@ func InitRaftNode(ID string, address string) (*RaftNode, error) {
 		state:         Follower,
 		followersList: make(map[string]*followerState),
 		commitIndex:   -1,
+		config:        config,
 		votedFor:      "",
 	}
 
@@ -131,17 +134,13 @@ func InitRaftNode(ID string, address string) (*RaftNode, error) {
 		return nil, err
 	}
 
-	err = raft.restoreStates()
-	if err != nil {
-		return nil, err
-	}
-
+	// Initialise logger
+	raft.logger, err = NewLogger(raft.id, &raft.state)
+	raft.restoreStates()
 	return raft, nil
 }
 
 func (r *RaftNode) restoreStates() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	client, err := mongodb.Connect()
 	if err != nil {
@@ -155,7 +154,9 @@ func (r *RaftNode) restoreStates() error {
 	r.currentTerm = NodeLog.CurrentTerm
 	r.address = NodeLog.Address
 	r.votedFor = NodeLog.VotedFor
-	r.config.members = NodeLog.Config.Members
+	// TODO: Uncomment this once config commit is done
+	//r.config.Members = NodeLog.Config.Members
+
 	r.log.entries = []LogEntry{}
 	for _, entry := range NodeLog.LogEntries {
 		r.log.entries = append(r.log.entries, LogEntry{
@@ -164,6 +165,8 @@ func (r *RaftNode) restoreStates() error {
 			Data:  entry.Data,
 		})
 	}
+
+	r.logger.Log("state restored, currentTerm = %d, votedFor = %s, log = %v", r.currentTerm, r.votedFor, r.log.entries)
 	return nil
 }
 
@@ -211,16 +214,16 @@ func (r *RaftNode) electionLoop() {
 // Currently it is called after waiting on a condition, so its thread safe!
 func (r *RaftNode) startElection() {
 	if r.state == Leader || r.state == Dead || time.Since(r.lastContact) < electionTimeout {
-		log.Println("election timed out but not started")
 		return
 	}
 
 	if r.state == Follower || r.state == Candidate {
+		r.logger.Log("election timeout")
 		r.becomeCandidate()
 	}
 
 	votesReceived := 1
-	for id, addr := range r.config.members {
+	for id, addr := range r.config.Members {
 		if id != r.id {
 			go r.sendRequestVote(id, addr, &votesReceived)
 		}
@@ -248,6 +251,7 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
 		LastLogTerm:  lastLogTerm,
 	}
 
+	r.logger.Log("sent RequestVote RPC to Node %s with Term: %d, LastLogIndex: %d, LastLogterm: %d", id, req.GetTerm(), req.GetLastLogIndex(), req.GetLastLogTerm())
 	r.mu.Unlock()
 	resp, err := r.node.SendRequestVoteRPC(addr, req)
 	r.mu.Lock()
@@ -272,6 +276,7 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
 		return
 	}
 
+	r.logger.Log("received Votes: %d", *votesRcd)
 	if r.state == Candidate && r.hasMajority(*votesRcd) {
 		r.becomeLeader()
 	}
@@ -283,23 +288,23 @@ func (r *RaftNode) RequestVoteHandler(req *pb.RequestVoteRequest, resp *pb.Reque
 	defer r.mu.Unlock()
 
 	if r.state == Dead {
-		return fmt.Errorf("node is in dead state, can't reply to RequestVote")
+		return fmt.Errorf("node is in dead state, can't reply to RequestVote RPC")
 	}
 
-	log.Println("Received RequestVote RPC from candiate: %w", req.GetCandidateId())
+	r.logger.Log("Received RequestVote RPC from candiate: %s", req.GetCandidateId())
 
 	resp.Term = int64(r.currentTerm)
 	resp.VoteGranted = false
 
 	// If some disruptive servers keep sending requests and we keep getting RPCs but election hasn't been timedout yet, ignore the RPCS
 	if time.Since(r.lastContact) < electionTimeout {
-		log.Println("rejecting RequestVote RPC: node has a leader %w already known", r.leaderId)
+		r.logger.Log("rejecting RequestVote RPC: node has a leader %s already known", r.leaderId)
 		return nil
 	}
 
 	// Reject outdated terms
 	if req.GetTerm() < int64(r.currentTerm) {
-		log.Println("rejecting RequestVote RPC: node's term is %w, req's term is %w", r.currentTerm, req.GetTerm())
+		r.logger.Log("rejecting RequestVote RPC: node's term is %d, req's term is %d", r.currentTerm, req.GetTerm())
 		return nil
 	}
 
@@ -311,29 +316,28 @@ func (r *RaftNode) RequestVoteHandler(req *pb.RequestVoteRequest, resp *pb.Reque
 
 	// Reject if I have already voted to someone else
 	if r.votedFor != "" && r.votedFor != req.GetCandidateId() {
-		log.Println("rejecting RequestVote RPC: already voted for %w", r.votedFor)
+		r.logger.Log("rejecting RequestVote RPC: already voted for %s", r.votedFor)
 		return nil
 	}
 
 	sz := len(r.log.entries)
 	if sz > 0 {
 		if r.log.entries[sz-1].Term > req.LastLogTerm || (r.log.entries[sz-1].Term == req.LastLogTerm && r.log.entries[sz-1].Index > req.LastLogIndex) {
-			log.Println("rejecting RequestVote RPC: current log: %w is more updated than the candidate's log :%w", r.log.entries[sz-1].Term, req.LastLogTerm)
+			r.logger.Log("rejecting RequestVote RPC: current log : (Term = %d, Index = %d) is more updated than the candidate's log : (Term = %d, Index = %d)", r.log.entries[sz-1].Term, r.log.entries[sz-1].Index, req.GetLastLogTerm(), req.GetLastLogIndex())
 			return nil
 
 		}
 	}
 
 	// Grant vote
-
 	resp.VoteGranted = true
 	r.lastContact = time.Now()
 	r.votedFor = req.GetCandidateId()
 
 	r.saveStateToDB()
 
-	log.Println(
-		"requestVote RPC successful: votedFor = %w, term = %w",
+	r.logger.Log(
+		"requestVote RPC successful: votedFor = %s, CurrentTerm = %d",
 		req.GetCandidateId(),
 		r.currentTerm,
 	)
@@ -368,6 +372,8 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 		PrevLogTerm:  prevLogTerm,
 		Entries:      convertToProtoEntries(entries),
 	}
+	r.logger.Log("sent AppendEntries RPC to Node %s with Term: %d, LeaderCommit: %d, PrevLogIndex: %d, PrevLogTerm: %d",
+		id, req.Term, req.LeaderCommit, req.PrevLogIndex, req.PrevLogTerm)
 
 	r.mu.Unlock()
 	resp, err := r.node.SendAppendEntriesRPC(addr, req)
@@ -401,6 +407,8 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 		return nil
 	}
 
+	r.leaderId = req.GetLeaderId()
+
 	// If the leader's term is greater, we step down as a follower
 	if req.Term > r.currentTerm {
 		r.becomeFollower(req.LeaderId, req.Term)
@@ -409,25 +417,33 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 	// Reset the timeout since we've received a valid append from the leader
 	r.lastContact = time.Now()
 
+	// If the node is still in candidate state, become a follower
+	if req.GetTerm() == r.currentTerm && r.state == Candidate {
+		r.becomeFollower(req.GetLeaderId(), req.GetTerm())
+	}
+
 	// Check if we have the previous log entry at PrevLogIndex and PrevLogTerm
 	if req.PrevLogIndex > 0 {
-		if len(r.log.entries) == 0 || req.PrevLogIndex > int64(len(r.log.entries)) || r.log.entries[req.PrevLogIndex-1].Term != req.PrevLogTerm {
+		if len(r.log.entries) == 0 || req.PrevLogIndex > int64(len(r.log.entries)) || r.log.entries[req.PrevLogIndex].Term != req.PrevLogTerm {
 			// Log inconsistency detected, reject the append
 			resp.Term = r.currentTerm
+			// TODO Populate the resp.Index (Conflicting Index)
 			resp.Success = false
 			return nil
 		}
 	}
 
-	// Append new entries to the log if any
+	// Append new entries to the log if any (The requests are 0-based)
 	for _, entry := range req.Entries {
 		// If there is already an entry at this index, replace it (log overwrite protection)
-		if entry.Index <= int64(len(r.log.entries)) {
-			r.log.entries[entry.Index-1] = LogEntry{
+		if entry.Index < int64(len(r.log.entries)) {
+			r.log.entries[entry.Index] = LogEntry{
 				Index: entry.Index,
 				Term:  entry.Term,
 				Data:  entry.Data,
 			}
+
+			// TODO: Update in mongodb as log is being changed
 		} else {
 			// Append new log entries
 			r.log.entries = append(r.log.entries, LogEntry{
@@ -435,6 +451,8 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 				Term:  entry.Term,
 				Data:  entry.Data,
 			})
+
+			// TODO: Update in mongodb as log is being changed
 		}
 	}
 
@@ -454,7 +472,7 @@ func (r *RaftNode) becomeCandidate() {
 	r.currentTerm++
 	r.votedFor = r.id
 	r.saveStateToDB()
-	log.Println("node %w transitioned to candidate state", r.id)
+	r.logger.Log("transitioned to candidate state with currentTerm: %d", r.currentTerm)
 }
 
 func (r *RaftNode) becomeFollower(leaderID string, term int64) {
@@ -463,45 +481,45 @@ func (r *RaftNode) becomeFollower(leaderID string, term int64) {
 	r.votedFor = ""
 	r.currentTerm = term
 	r.saveStateToDB()
-	log.Println("node %w transitioned to follower state", r.id)
+	r.logger.Log("transitioned to follower state with currentTerm: %d", r.currentTerm)
 }
 
 func (r *RaftNode) becomeLeader() {
+	r.state = Leader
 	r.leaderId = r.id
 	for _, follower := range r.followersList {
+		// We do 0-based indexing in log, entries index start from 0, 1 ,2 etc
 		follower.nextIndex = int64(len(r.log.entries))
 		follower.matchIndex = -1
 	}
 
 	responsesRcd := 1
-	for id, addr := range r.config.members {
+	for id, addr := range r.config.Members {
 		if id != r.id {
 			go r.sendAppendEntries(id, addr, &responsesRcd)
 		}
 	}
-	log.Println("node %w transitioned to leader state", r.id)
+	r.logger.Log("transitioned to leader state with currentTerm : %d", r.currentTerm)
 }
 
 // returns true if majority has been reached for the input number of votes
 // should be called inside a thread safe func
 func (r *RaftNode) hasMajority(count int) bool {
-	return count > len(r.config.members)
+	return count > len(r.config.Members)/2
 }
 
 // To be done after calling InitServer
-func (r *RaftNode) start() error {
+func (r *RaftNode) Start() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if err := r.restoreStates(); err != nil {
-		return err
-	}
+	r.restoreStates()
 
 	r.node.registerRequestVoteHandler(r.RequestVoteHandler)
 	r.node.registerAppendEntriesHandler(r.AppendEntriesHandler)
 
 	// Initalise the followers list
-	for id := range r.config.members {
+	for id := range r.config.Members {
 		r.followersList[id] = new(followerState)
 	}
 	r.state = Follower
@@ -515,7 +533,7 @@ func (r *RaftNode) start() error {
 	if err := r.node.Start(); err != nil {
 		return err
 	}
-	log.Println("Server with ID: %w is started", r.id)
+	r.logger.Log("Server is started")
 
 	return nil
 }
@@ -524,7 +542,7 @@ func (r *RaftNode) start() error {
 func (r *RaftNode) saveStateToDB() error {
 	err := mongodb.Voted(*r.mongoClient, r.id, r.votedFor, r.currentTerm)
 	if err != nil {
-		return fmt.Errorf("error while saving state to database: %w", err)
+		return fmt.Errorf("error while saving state to database: %s", err)
 	}
 	return nil
 }
