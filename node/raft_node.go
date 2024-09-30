@@ -462,7 +462,19 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 		if len(r.log.entries) == 0 || req.PrevLogIndex > int64(len(r.log.entries)) || r.log.entries[req.PrevLogIndex].Term != req.PrevLogTerm {
 			// Log inconsistency detected, reject the append
 			resp.Term = r.currentTerm
-			// TODO Populate the resp.Index (Conflicting Index)
+			resp.ConflictTerm = r.log.entries[req.PrevLogIndex].Term
+			// Find the first index of the conflicting term in the log
+			firstInd := int64(-1)
+			for i := req.PrevLogIndex; i >= 0; i-- {
+				if r.log.entries[i].Term != resp.ConflictTerm {
+					firstInd = i + 1
+					break
+				}
+			}
+			if firstInd == -1 {
+				firstInd = 0
+			}
+			resp.ConflictIndex = firstInd
 			resp.Success = false
 			return nil
 		}
