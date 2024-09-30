@@ -19,8 +19,9 @@ message AppendEntriesRequest {
 
 message AppendEntriesResponse {
     int64 term    = 1;
-    int64 index   = 2;
-    bool   success = 3;
+    int64 conflict_index   = 2;
+    int64 conflict_term = 3;
+    bool   success = 4;
 }
 
 message RequestVoteRequest {
