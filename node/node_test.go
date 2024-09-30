@@ -55,6 +55,8 @@ func TestAppendEntriesUpdateTermAndBecomeFollower(t *testing.T) {
 	req := &pb.AppendEntriesRequest{
 		Term:     2, // higher than current term
 		LeaderId: "leader2",
+		PrevLogIndex: -1, // No previous log entry
+		PrevLogTerm:  0,
 	}
 
 	resp := &pb.AppendEntriesResponse{}
@@ -80,21 +82,25 @@ func TestAppendEntriesLogInconsistency(t *testing.T) {
 	raftNode.SetLog(&node.Log{})
 	raftNode.GetLog().SetEntries([]node.LogEntry{
 		{Index: 0, Term: 1, Data: []byte("entry1")},
+		{Index: 1, Term: 2, Data: []byte("entry2")},
+		{Index: 2, Term: 2, Data: []byte("entry3")},
 	})
 
 	// Create an AppendEntriesRequest with a mismatching PrevLogIndex and PrevLogTerm
 	req := &pb.AppendEntriesRequest{
-		Term:         2,
+		Term:         4,
 		LeaderId:     "leader1",
-		PrevLogIndex: 0, // Log entry exists at index 1 but with a different term
-		PrevLogTerm:  2, // This should cause a failure
+		PrevLogIndex: 2, // Log entry exists at index 1 but with a different term
+		PrevLogTerm:  3, // This should cause a failure
 	}
 
 	resp := &pb.AppendEntriesResponse{}
 	err := raftNode.AppendEntriesHandler(req, resp)
 
 	assert.NoError(t, err)
-	assert.Equal(t, int64(2), resp.Term)
+	assert.Equal(t, int64(4), resp.Term)
+	assert.Equal(t, int64(2), resp.ConflictTerm, "Conflict term should be the term of the mismatching log entry")
+	assert.Equal(t, int64(1), resp.ConflictIndex, "Conflict index should be the index of the first mismatching log entry for that term")
 	assert.False(t, resp.Success, "AppendEntries should fail due to log inconsistency")
 }
 
@@ -111,12 +117,12 @@ func TestAppendEntriesAppendAndCommit(t *testing.T) {
 	req := &pb.AppendEntriesRequest{
 		Term:         2,
 		LeaderId:     "leader1",
-		PrevLogIndex: 0, // No previous log entry
+		PrevLogIndex: -1, // No previous log entry
 		PrevLogTerm:  0,
 		LeaderCommit: 2, // Commit index update
 		Entries: []*pb.LogEntry{
-			{Index: 1, Term: 2, Data: []byte("entry1")},
-			{Index: 2, Term: 2, Data: []byte("entry2")},
+			{Index: 0, Term: 2, Data: []byte("entry1")},
+			{Index: 1, Term: 2, Data: []byte("entry2")},
 		},
 	}
 
