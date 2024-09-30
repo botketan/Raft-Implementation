@@ -364,7 +364,7 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	peer := r.followersList[id]
 	nextIndex := peer.nextIndex
 	prevLogIndex := nextIndex - 1
-	var prevLogTerm int64 = -1
+	var prevLogTerm int64 = 0
 	if prevLogIndex >= 0 {
 		prevLogTerm = r.log.entries[prevLogIndex].Term
 	}
@@ -397,8 +397,37 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 
 	*respRcd++
 
-	// TODO: Complete it
+	// At this point r.state is definitely a leader
+	if resp.GetTerm() != req.GetTerm() {
+		return
+	}
 
+	// There is a conflict in log
+	if !resp.GetSuccess() {
+		if resp.GetConflictTerm() == 0 {
+			// This means prevLogIndex is too high, so just update the nextIndex with ConflictIndex
+			// and try again in next append entries loop!
+			peer.nextIndex = resp.GetConflictIndex()
+		} else {
+			// This means we have to skip through all the term entries as in resp.ConflictTerm
+			// Find the first Index of term after the Conflict Term and set it as new nextIndex
+			var lastIndexOfConflictTerm int64 = -1
+			for idx := len(r.log.entries) - 1; idx >= 0; idx-- {
+				if r.log.entries[idx].Term == resp.GetConflictTerm() {
+					lastIndexOfConflictTerm = int64(idx)
+					break
+				}
+			}
+			if lastIndexOfConflictTerm != -1 {
+				// If there exists a term mentioned by conflict term in this log
+				peer.nextIndex = lastIndexOfConflictTerm + 1
+			} else {
+				peer.nextIndex = min(peer.nextIndex-1, resp.GetConflictIndex())
+			}
+		}
+	}
+
+	// TODO: The case when success
 }
 
 // Appends new log entries to the log on receiving a request from the leader
