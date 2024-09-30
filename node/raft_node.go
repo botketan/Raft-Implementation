@@ -442,7 +442,7 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 				Term:  entry.Term,
 				Data:  entry.Data,
 			}
-
+			mongodb.ChangeLog(*r.mongoClient, r.id, entry.Index, entry.Term, entry.Index, entry.Data)
 			// TODO: Update in mongodb as log is being changed
 		} else {
 			// Append new log entries
@@ -451,7 +451,7 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 				Term:  entry.Term,
 				Data:  entry.Data,
 			})
-
+			mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data)
 			// TODO: Update in mongodb as log is being changed
 		}
 	}
