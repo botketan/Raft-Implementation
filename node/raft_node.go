@@ -97,7 +97,7 @@ type RaftNode struct {
 	followersList map[string]*followerState // To map id to other follower state
 
 	node *Node
-	log  Log
+	log  *Log
 
 	//MongoDB Connection
 	mongoClient *mongo.Client
@@ -112,6 +112,7 @@ func InitRaftNode(ID string, address string, config *Configuration) (*RaftNode, 
 		return nil, err
 	}
 
+	// Initialize the RaftNode with default values
 	raft := &RaftNode{
 		id:            ID,
 		node:          node,
@@ -121,6 +122,7 @@ func InitRaftNode(ID string, address string, config *Configuration) (*RaftNode, 
 		commitIndex:   -1,
 		config:        config,
 		votedFor:      "",
+		log:           &Log{}, // Initialize log to prevent nil pointer dereference
 	}
 
 	raft.applyCond = sync.NewCond(&raft.mu)
@@ -136,6 +138,10 @@ func InitRaftNode(ID string, address string, config *Configuration) (*RaftNode, 
 
 	// Initialise logger
 	raft.logger, err = NewLogger(raft.id, &raft.state)
+	if err != nil {
+		return nil, err
+	}
+
 	raft.restoreStates()
 	return raft, nil
 }
@@ -423,7 +429,7 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 	}
 
 	// Check if we have the previous log entry at PrevLogIndex and PrevLogTerm
-	if req.PrevLogIndex > 0 {
+	if req.PrevLogIndex >= 0 {
 		if len(r.log.entries) == 0 || req.PrevLogIndex > int64(len(r.log.entries)) || r.log.entries[req.PrevLogIndex].Term != req.PrevLogTerm {
 			// Log inconsistency detected, reject the append
 			resp.Term = r.currentTerm
@@ -566,4 +572,64 @@ func min(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+// Getter for currentTerm
+func (r *RaftNode) GetCurrentTerm() int64 {
+	return r.currentTerm
+}
+
+// Setter for currentTerm (useful for testing)
+func (r *RaftNode) SetCurrentTerm(term int64) {
+	r.currentTerm = term
+}
+
+// Getter for state
+func (r *RaftNode) GetState() State {
+	return r.state
+}
+
+// Setter for state (useful for testing)
+func (r *RaftNode) SetState(state State) {
+	r.state = state
+}
+
+// Getter for leaderId
+func (r *RaftNode) GetLeaderId() string {
+	return r.leaderId
+}
+
+// Setter for leaderId (useful for testing)
+func (r *RaftNode) SetLeaderId(leaderId string) {
+	r.leaderId = leaderId
+}
+
+// Getter for log
+func (r *RaftNode) GetLog() *Log {
+	return r.log
+}
+
+// Setter for log (useful for testing)
+func (r *RaftNode) SetLog(log *Log) {
+	r.log = log
+}
+
+// Getter for commitIndex
+func (r *RaftNode) GetCommitIndex() int64 {
+	return r.commitIndex
+}
+
+// Setter for commitIndex (useful for testing)
+func (r *RaftNode) SetCommitIndex(commitIndex int64) {
+	r.commitIndex = commitIndex
+}
+
+// Getter for entries in Log
+func (l *Log) GetEntries() []LogEntry {
+	return l.entries
+}
+
+// Setter for entries in Log (useful for testing)
+func (l *Log) SetEntries(entries []LogEntry) {
+	l.entries = entries
 }
