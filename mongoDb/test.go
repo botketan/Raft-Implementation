@@ -42,3 +42,18 @@ func TestConnect() error {
 	fmt.Println(insertResult)
 	return nil
 }
+
+func TestFunctions() error {
+	client, err := Connect()
+	if err != nil {
+		return fmt.Errorf("error while connecting to mongoDB: %w", err)
+	}
+	// fmt.Print(client)
+	defer client.Disconnect(context.Background())
+
+	err = TrimLog(*client, "node1", 12)
+	if err != nil {
+		return fmt.Errorf("error while changing log: %w", err)
+	}
+	return nil
+}

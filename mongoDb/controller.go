@@ -2,6 +2,7 @@ package mongodb
 
 import (
 	"context"
+	"fmt"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -44,18 +45,19 @@ func ChangeLog(client mongo.Client, NodeId string, logindex int64, term int64, i
 	Collection := db.Collection("NodeLog")
 	_, err := Collection.UpdateOne(context.TODO(),
 		bson.M{"node_id": NodeId},
-		bson.M{"$set": bson.M{"log_entry.$.data": data,
-			"log_entry.$.term":  term,
-			"log_entry.$.index": index}})
+		bson.M{"$set": bson.M{("log_entry." + fmt.Sprint(logindex) + ".data"): data,
+			("log_entry." + fmt.Sprint(logindex) + ".term"):  term,
+			("log_entry." + fmt.Sprint(logindex) + ".index"): index}})
 	return err
 }
 
 func TrimLog(client mongo.Client, NodeId string, logindex int64) error {
 	db := client.Database("raft")
 	Collection := db.Collection("NodeLog")
-	_, err := Collection.UpdateOne(context.TODO(),
+	result, err := Collection.UpdateOne(context.TODO(),
 		bson.M{"node_id": NodeId},
 		bson.M{"$set": bson.M{"log_entry": bson.M{
-			"$slice": logindex}}})
+			"$slice": []interface{}{"$log_entry", logindex}}}})
+	fmt.Println(result)
 	return err
 }
