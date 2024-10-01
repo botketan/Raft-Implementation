@@ -25,8 +25,8 @@ const (
 )
 
 const (
-	electionTimeout  = time.Duration(300 * time.Millisecond)
-	heartbeatTimeout = time.Duration(50 * time.Millisecond)
+	electionTimeout  = time.Duration(3500 * time.Millisecond)
+	heartbeatTimeout = time.Duration(100 * time.Millisecond)
 )
 
 func (s State) String() string {
@@ -69,6 +69,14 @@ type LogEntry struct {
 
 type Log struct {
 	entries []LogEntry
+}
+
+func (l *Log) LogInLogger(logger *Logger) {
+	logger.Log("*******************************************")
+	for i, entry := range l.entries {
+		logger.Log("Log Entry %d: Index=%d, Term=%d, Data=%s\n", i, entry.Index, entry.Term, string(entry.Data))
+	}
+	logger.Log("*******************************************")
 }
 
 type RaftNode struct {
@@ -231,6 +239,7 @@ func (r *RaftNode) heartbeatLoop() {
 			continue
 		}
 		if r.state == Leader {
+			r.logger.Log("heartbeat Timeout, sending AE")
 			responsesRcd := 0
 			for id, addr := range r.config.Members {
 				if id != r.id {
@@ -557,6 +566,9 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 			mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data)
 		}
 	}
+
+	// DEBUG
+	r.log.LogInLogger(&r.logger)
 
 	// Update commit index if leaderCommit is greater than our commitIndex
 	if req.LeaderCommit > r.commitIndex {
