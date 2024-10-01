@@ -15,7 +15,7 @@ func Connect() (*mongo.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx, _ := context.WithTimeout(context.Background(),
+	ctx, _ := context.WithTimeout(context.TODO(),
 		30*time.Second)
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(os.Getenv("URI")))
 	return client, err
