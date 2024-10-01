@@ -53,8 +53,8 @@ func TestAppendEntriesUpdateTermAndBecomeFollower(t *testing.T) {
 
 	// Create an AppendEntriesRequest with a higher term
 	req := &pb.AppendEntriesRequest{
-		Term:     2, // higher than current term
-		LeaderId: "leader2",
+		Term:         2, // higher than current term
+		LeaderId:     "leader2",
 		PrevLogIndex: -1, // No previous log entry
 		PrevLogTerm:  0,
 	}
@@ -136,4 +136,98 @@ func TestAppendEntriesAppendAndCommit(t *testing.T) {
 	entries := raftNode.GetLog().GetEntries()
 	assert.Equal(t, 2, len(entries), "Log should have two new entries")
 	assert.Equal(t, int64(2), raftNode.GetCommitIndex(), "Commit index should be updated")
+}
+
+// Test case: AppendEntries with matching log entries (no changes should be made)
+func TestAppendEntriesWithMatchingLog(t *testing.T) {
+	raftNode := setupRaftNode()
+
+	// Set current term and log entries
+	raftNode.SetCurrentTerm(3)
+	raftNode.SetLog(&node.Log{})
+	raftNode.GetLog().SetEntries([]node.LogEntry{
+		{Index: 0, Term: 3, Data: []byte("entry1")},
+		{Index: 1, Term: 3, Data: []byte("entry2")},
+	})
+
+	// Create AppendEntriesRequest with matching log entries
+	req := &pb.AppendEntriesRequest{
+		Term:         3,
+		LeaderId:     "leader1",
+		PrevLogIndex: 1,
+		PrevLogTerm:  3,
+		LeaderCommit: 1,
+		Entries: []*pb.LogEntry{
+			{Index: 1, Term: 3, Data: []byte("entry2")}, // Matching entry
+		},
+	}
+
+	resp := &pb.AppendEntriesResponse{}
+	err := raftNode.AppendEntriesHandler(req, resp)
+
+	assert.NoError(t, err)
+	assert.True(t, resp.Success, "AppendEntries should succeed")
+	assert.Equal(t, 2, len(raftNode.GetLog().GetEntries()), "No new entries should be added")
+}
+
+// Test case: AppendEntries with empty entries but valid term (heartbeat)
+func TestAppendEntriesHeartbeat(t *testing.T) {
+	raftNode := setupRaftNode()
+
+	// Set current term
+	raftNode.SetCurrentTerm(3)
+
+	// Create AppendEntriesRequest with no new entries (heartbeat)
+	req := &pb.AppendEntriesRequest{
+		Term:         3,
+		LeaderId:     "leader1",
+		PrevLogIndex: -1,
+		PrevLogTerm:  0,
+		LeaderCommit: 0,
+		Entries:      []*pb.LogEntry{},
+	}
+
+	resp := &pb.AppendEntriesResponse{}
+	err := raftNode.AppendEntriesHandler(req, resp)
+
+	assert.NoError(t, err)
+	assert.True(t, resp.Success, "Heartbeat should succeed")
+}
+
+// Test case: AppendEntries with conflicting log entries (overwrite conflicting entries)
+func TestAppendEntriesWithConflictingEntries(t *testing.T) {
+	raftNode := setupRaftNode()
+
+	// Set current term and log entries
+	raftNode.SetCurrentTerm(3)
+	raftNode.SetLog(&node.Log{})
+	raftNode.GetLog().SetEntries([]node.LogEntry{
+		{Index: 0, Term: 2, Data: []byte("entry1")},
+		{Index: 1, Term: 2, Data: []byte("entry2")},
+	})
+
+	// Create AppendEntriesRequest with conflicting entries
+	req := &pb.AppendEntriesRequest{
+		Term:         3,
+		LeaderId:     "leader1",
+		PrevLogIndex: 0,
+		PrevLogTerm:  2,
+		LeaderCommit: 2,
+		Entries: []*pb.LogEntry{
+			{Index: 1, Term: 3, Data: []byte("new entry2")}, // Conflict at index 1
+			{Index: 2, Term: 3, Data: []byte("new entry3")},
+		},
+	}
+
+	resp := &pb.AppendEntriesResponse{}
+	err := raftNode.AppendEntriesHandler(req, resp)
+
+	assert.NoError(t, err)
+	assert.True(t, resp.Success, "AppendEntries should succeed")
+
+	// Ensure the conflicting log entry was overwritten and new entries appended
+	entries := raftNode.GetLog().GetEntries()
+	assert.Equal(t, 3, len(entries), "Log should have 3 entries")
+	assert.Equal(t, []byte("new entry2"), entries[1].Data, "Conflicting entry should be overwritten")
+	assert.Equal(t, []byte("new entry3"), entries[2].Data, "New entry should be appended")
 }
