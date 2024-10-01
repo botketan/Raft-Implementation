@@ -217,6 +217,29 @@ func (r *RaftNode) electionLoop() {
 	}
 }
 
+// Sends Append Entries RPC to the followers when node is a leader
+func (r *RaftNode) heartbeatLoop() {
+	defer r.wg.Done()
+
+	for {
+		time.Sleep(heartbeatTimeout)
+		r.mu.Lock()
+		if r.state != Leader {
+			r.mu.Unlock()
+			continue
+		}
+		if r.state == Leader {
+			responsesRcd := 0
+			for id, addr := range r.config.Members {
+				if id != r.id {
+					go r.sendAppendEntries(id, addr, &responsesRcd)
+				}
+			}
+			r.mu.Unlock()
+		}
+	}
+}
+
 // Starts the election , this should be called under thread safe conditions
 // Currently it is called after waiting on a condition, so its thread safe!
 func (r *RaftNode) startElection() {
@@ -386,6 +409,8 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	resp, err := r.node.SendAppendEntriesRPC(addr, req)
 	r.mu.Lock()
 
+	r.logger.Log("received AppendEntries Response from Node %s with Term: %d, ConflictIndex: %d, ConflictTerm: %d, Success: %s", id, resp.GetTerm(), resp.GetConflictIndex(), resp.GetConflictTerm(), resp.GetSuccess())
+
 	if r.state != Leader || err != nil {
 		return
 	}
@@ -402,6 +427,8 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	if resp.GetTerm() != req.GetTerm() {
 		return
 	}
+
+	r.logger.Log("before updating, Node %s's nextIndex: %d, matchIndex: %d", id, peer.nextIndex, peer.matchIndex)
 
 	// There is a conflict in log
 	if !resp.GetSuccess() {
@@ -426,6 +453,8 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 				peer.nextIndex = min(peer.nextIndex-1, resp.GetConflictIndex())
 			}
 		}
+
+		r.logger.Log("AE fail, Updated Node %s 's nextIndex: %d, matchIndex: %d", id, peer.nextIndex, peer.matchIndex)
 		return
 	}
 
@@ -433,8 +462,11 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	peer.nextIndex = nextIndex + int64(len(entries))
 	peer.matchIndex = peer.nextIndex - 1
 
+	r.logger.Log("AE success, Updated Node %s 's nextIndex: %d, matchIndex: %d", id, peer.nextIndex, peer.matchIndex)
+
 	// Entries beyond the already committed entries are replicated, so there can be a possibility of commiting
 	if peer.matchIndex > r.commitIndex {
+		r.logger.Log("Waking up commitCond Loop, commitIndex: %d, curr MatchIndex: %d", r.commitIndex, peer.matchIndex)
 		r.commitCond.Broadcast()
 	}
 }
@@ -588,9 +620,10 @@ func (r *RaftNode) Start() error {
 	r.lastContact = time.Now()
 
 	// TODO add the remaining loops
-	r.wg.Add(2)
+	r.wg.Add(3)
 	go r.electionClock()
 	go r.electionLoop()
+	go r.heartbeatLoop()
 
 	if err := r.node.Start(); err != nil {
 		return err
