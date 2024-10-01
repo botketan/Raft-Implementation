@@ -390,8 +390,8 @@ func (r *RaftNode) heartbeatClock() {
 			return
 		}
 
-		r.heartbeatCond.Broadcast() // Notify the heartbeat condition
 		r.mu.Unlock()
+		r.heartbeatCond.Broadcast() // Notify the heartbeat condition
 	}
 }
 
