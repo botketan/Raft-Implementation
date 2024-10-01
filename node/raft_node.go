@@ -377,24 +377,6 @@ func (r *RaftNode) RequestVoteHandler(req *pb.RequestVoteRequest, resp *pb.Reque
 	return nil
 }
 
-// Handles the heartbeat timeout
-func (r *RaftNode) heartbeatClock() {
-	defer r.wg.Done()
-
-	for {
-		time.Sleep(heartbeatTimeout)
-
-		r.mu.Lock()
-		if r.state != Leader {
-			r.mu.Unlock()
-			return
-		}
-
-		r.mu.Unlock()
-		r.heartbeatCond.Broadcast() // Notify the heartbeat condition
-	}
-}
-
 // Send append entries to a node (id, address) and process it
 func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	r.mu.Lock()
@@ -619,11 +601,6 @@ func (r *RaftNode) becomeLeader() {
 		}
 	}
 
-	// Start the heartbeat clock and heartbeat loop
-	r.wg.Add(2)
-	go r.heartbeatClock() // Periodically broadcast heartbeats
-	go r.heartbeatLoop()  // Heartbeat loop sends AppendEntries (heartbeats)
-
 	r.logger.Log("Node transitioned to leader state with currentTerm: %d", r.currentTerm)
 }
 
@@ -651,9 +628,10 @@ func (r *RaftNode) Start() error {
 	r.lastContact = time.Now()
 
 	// TODO add the remaining loops
-	r.wg.Add(2)
+	r.wg.Add(3)
 	go r.electionClock()
 	go r.electionLoop()
+	go r.heartbeatLoop()
 
 	if err := r.node.Start(); err != nil {
 		return err
