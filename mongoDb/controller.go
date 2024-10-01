@@ -43,9 +43,19 @@ func ChangeLog(client mongo.Client, NodeId string, logindex int64, term int64, i
 	db := client.Database("raft")
 	Collection := db.Collection("NodeLog")
 	_, err := Collection.UpdateOne(context.TODO(),
-		bson.M{"node_id": NodeId, "log_entry.index": logindex},
+		bson.M{"node_id": NodeId},
 		bson.M{"$set": bson.M{"log_entry.$.data": data,
 			"log_entry.$.term":  term,
 			"log_entry.$.index": index}})
+	return err
+}
+
+func TrimLog(client mongo.Client, NodeId string, logindex int64) error {
+	db := client.Database("raft")
+	Collection := db.Collection("NodeLog")
+	_, err := Collection.UpdateOne(context.TODO(),
+		bson.M{"node_id": NodeId},
+		bson.M{"$set": bson.M{"log_entry": bson.M{
+			"$slice": logindex}}})
 	return err
 }
