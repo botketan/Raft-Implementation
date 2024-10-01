@@ -120,6 +120,7 @@ func InitRaftNode(ID string, address string, config *Configuration) (*RaftNode, 
 		state:         Follower,
 		followersList: make(map[string]*followerState),
 		commitIndex:   -1,
+		lastApplied:   -1,
 		config:        config,
 		votedFor:      "",
 		log:           &Log{}, // Initialize log to prevent nil pointer dereference
@@ -425,9 +426,17 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 				peer.nextIndex = min(peer.nextIndex-1, resp.GetConflictIndex())
 			}
 		}
+		return
 	}
 
-	// TODO: The case when success
+	// If its successful response
+	peer.nextIndex = nextIndex + int64(len(entries))
+	peer.matchIndex = peer.nextIndex - 1
+
+	// Entries beyond the already committed entries are replicated, so there can be a possibility of commiting
+	if peer.matchIndex > r.commitIndex {
+		r.commitCond.Broadcast()
+	}
 }
 
 // Appends new log entries to the log on receiving a request from the leader
@@ -511,7 +520,8 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 	// Update commit index if leaderCommit is greater than our commitIndex
 	if req.LeaderCommit > r.commitIndex {
 		r.commitIndex = min(req.LeaderCommit, int64(len(r.log.entries)))
-		r.commitCond.Broadcast()
+		// Commit loop has been advanced, so try to apply the operations to state machines
+		r.applyCond.Broadcast()
 	}
 
 	resp.Term = r.currentTerm
