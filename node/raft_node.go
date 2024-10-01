@@ -80,6 +80,7 @@ type RaftNode struct {
 	applyCond    *sync.Cond
 	commitCond   *sync.Cond
 	electionCond *sync.Cond
+	heartbeatCond *sync.Cond
 
 	// Persistent states to be stored
 	id          string
@@ -129,6 +130,7 @@ func InitRaftNode(ID string, address string, config *Configuration) (*RaftNode, 
 	raft.applyCond = sync.NewCond(&raft.mu)
 	raft.commitCond = sync.NewCond(&raft.mu)
 	raft.electionCond = sync.NewCond(&raft.mu)
+	raft.heartbeatCond = sync.NewCond(&raft.mu)
 
 	//MongoDb Connection
 	raft.mongoClient, err = mongodb.Connect()
@@ -375,6 +377,45 @@ func (r *RaftNode) RequestVoteHandler(req *pb.RequestVoteRequest, resp *pb.Reque
 	return nil
 }
 
+// Handles the heartbeat timeout
+func (r *RaftNode) heartbeatClock() {
+    defer r.wg.Done()
+
+    for {
+        time.Sleep(heartbeatTimeout)
+
+        r.mu.Lock()
+        if r.state != Leader {
+            r.mu.Unlock()
+            return
+        }
+
+        r.heartbeatCond.Broadcast() // Notify the heartbeat condition
+        r.mu.Unlock()
+    }
+}
+
+// Heartbeat loop is a long-running loop that sends heartbeats (AppendEntries) to all followers
+func (r *RaftNode) heartbeatLoop() {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    defer r.wg.Done()
+
+    for r.state != Dead {
+        // Wait for the heartbeat condition
+        r.heartbeatCond.Wait()
+
+        // Only send heartbeats if the node is a leader
+        if r.state == Leader {
+            for id, addr := range r.config.Members {
+                if id != r.id {
+                    go r.sendAppendEntries(id, addr, nil) // Sending heartbeats
+                }
+            }
+        }
+    }
+}
+
 // Send append entries to a node (id, address) and process it
 func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	r.mu.Lock()
@@ -526,6 +567,12 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 		}
 	}
 
+	// If we have conflicting entries after PrevLogIndex, we delete those entries
+    if len(r.log.entries) > 0 && req.PrevLogIndex < int64(len(r.log.entries))-1 {
+        // Delete conflicting entries starting from PrevLogIndex + 1
+        r.log.entries = r.log.entries[:req.PrevLogIndex+1]
+    }
+
 	// Append new entries to the log if any (The requests are 0-based)
 	for _, entry := range req.Entries {
 		// If there is already an entry at this index, replace it (log overwrite protection)
@@ -579,13 +626,12 @@ func (r *RaftNode) becomeFollower(leaderID string, term int64) {
 }
 
 func (r *RaftNode) becomeLeader() {
-	r.state = Leader
-	r.leaderId = r.id
-	for _, follower := range r.followersList {
-		// We do 0-based indexing in log, entries index start from 0, 1 ,2 etc
-		follower.nextIndex = int64(len(r.log.entries))
-		follower.matchIndex = -1
-	}
+    r.state = Leader
+    r.leaderId = r.id
+    for _, follower := range r.followersList {
+        follower.nextIndex = int64(len(r.log.entries)) // Log indexing
+        follower.matchIndex = -1
+    }
 
 	responsesRcd := 1
 	for id, addr := range r.config.Members {
@@ -593,7 +639,13 @@ func (r *RaftNode) becomeLeader() {
 			go r.sendAppendEntries(id, addr, &responsesRcd)
 		}
 	}
-	r.logger.Log("transitioned to leader state with currentTerm : %d", r.currentTerm)
+
+    // Start the heartbeat clock and heartbeat loop
+    r.wg.Add(2)
+    go r.heartbeatClock()  // Periodically broadcast heartbeats
+    go r.heartbeatLoop()   // Heartbeat loop sends AppendEntries (heartbeats)
+
+    r.logger.Log("Node transitioned to leader state with currentTerm: %d", r.currentTerm)
 }
 
 // returns true if majority has been reached for the input number of votes
