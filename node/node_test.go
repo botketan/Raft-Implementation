@@ -231,3 +231,41 @@ func TestAppendEntriesWithConflictingEntries(t *testing.T) {
 	assert.Equal(t, []byte("new entry2"), entries[1].Data, "Conflicting entry should be overwritten")
 	assert.Equal(t, []byte("new entry3"), entries[2].Data, "New entry should be appended")
 }
+
+// Test case: Delete conflicting log entries and append new entries
+func TestAppendEntriesDeleteConflictingEntries(t *testing.T) {
+	raftNode := setupRaftNode()
+
+	// Set current term and log entries
+	raftNode.SetCurrentTerm(3)
+	raftNode.SetLog(&node.Log{})
+	raftNode.GetLog().SetEntries([]node.LogEntry{
+		{Index: 0, Term: 2, Data: []byte("entry1")},
+		{Index: 1, Term: 2, Data: []byte("entry2")},
+	})
+
+	// Create AppendEntriesRequest with conflicting entries
+	req := &pb.AppendEntriesRequest{
+		Term:         3,
+		LeaderId:     "leader1",
+		PrevLogIndex: 0,
+		PrevLogTerm:  2,
+		LeaderCommit: 2,
+		Entries: []*pb.LogEntry{
+			{Index: 1, Term: 3, Data: []byte("new entry2")}, // Conflict at index 1
+			{Index: 2, Term: 3, Data: []byte("new entry3")},
+		},
+	}
+
+	resp := &pb.AppendEntriesResponse{}
+	err := raftNode.AppendEntriesHandler(req, resp)
+
+	assert.NoError(t, err)
+	assert.True(t, resp.Success, "AppendEntries should succeed")
+
+	// Ensure the conflicting log entry was deleted and new entries appended
+	entries := raftNode.GetLog().GetEntries()
+	assert.Equal(t, 3, len(entries), "Log should have 3 entries")
+	assert.Equal(t, []byte("new entry2"), entries[1].Data, "Conflicting entry should be deleted")
+	assert.Equal(t, []byte("new entry3"), entries[2].Data, "New entry should be appended")
+}

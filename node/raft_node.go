@@ -532,6 +532,7 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 	if len(r.log.entries) > 0 && req.PrevLogIndex < int64(len(r.log.entries))-1 {
 		// Delete conflicting entries starting from PrevLogIndex + 1
 		r.log.entries = r.log.entries[:req.PrevLogIndex+1]
+		// TODO: Remove the conflicting entries from the database
 	}
 
 	// Append new entries to the log if any (The requests are 0-based)
