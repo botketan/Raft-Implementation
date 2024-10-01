@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	"log"
 	"math/rand"
 	mongodb "raft/mongoDb"
 	pb "raft/protos"
@@ -26,8 +25,8 @@ const (
 )
 
 const (
-	electionTimeout  = time.Duration(300 * time.Millisecond)
-	heartbeatTimeout = time.Duration(50 * time.Millisecond)
+	electionTimeout  = time.Duration(3500 * time.Millisecond)
+	heartbeatTimeout = time.Duration(100 * time.Millisecond)
 )
 
 func (s State) String() string {
@@ -70,6 +69,14 @@ type LogEntry struct {
 
 type Log struct {
 	entries []LogEntry
+}
+
+func (l *Log) LogInLogger(logger *Logger) {
+	logger.Log("*******************************************")
+	for i, entry := range l.entries {
+		logger.Log("Log Entry %d: Index=%d, Term=%d, Data=%s\n", i, entry.Index, entry.Term, string(entry.Data))
+	}
+	logger.Log("*******************************************")
 }
 
 type RaftNode struct {
@@ -232,6 +239,7 @@ func (r *RaftNode) heartbeatLoop() {
 			continue
 		}
 		if r.state == Leader {
+			r.logger.Log("heartbeat Timeout, sending AE")
 			responsesRcd := 0
 			for id, addr := range r.config.Members {
 				if id != r.id {
@@ -533,12 +541,7 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 	if len(r.log.entries) > 0 && req.PrevLogIndex < int64(len(r.log.entries))-1 {
 		// Delete conflicting entries starting from PrevLogIndex + 1
 		r.log.entries = r.log.entries[:req.PrevLogIndex+1]
-		// TODO: Remove the conflicting entries from the database
-		err := mongodb.TrimLog(*r.mongoClient, r.id, req.PrevLogIndex+1)
-		if err != nil {
-			log.Printf("Error while trimming log: %s", err)
-			return err
-		}
+		mongodb.TrimLog(*r.mongoClient, r.id, req.PrevLogIndex+1)
 	}
 
 	// Append new entries to the log if any (The requests are 0-based)
@@ -563,6 +566,9 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 			mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data)
 		}
 	}
+
+	// DEBUG
+	r.log.LogInLogger(&r.logger)
 
 	// Update commit index if leaderCommit is greater than our commitIndex
 	if req.LeaderCommit > r.commitIndex {
