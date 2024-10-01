@@ -651,10 +651,9 @@ func (r *RaftNode) Start() error {
 	r.lastContact = time.Now()
 
 	// TODO add the remaining loops
-	r.wg.Add(3)
+	r.wg.Add(2)
 	go r.electionClock()
 	go r.electionLoop()
-	go r.heartbeatLoop()
 
 	if err := r.node.Start(); err != nil {
 		return err
