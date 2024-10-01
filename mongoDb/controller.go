@@ -57,7 +57,7 @@ func TrimLog(client mongo.Client, NodeId string, logindex int64) error {
 	result, err := Collection.UpdateOne(context.TODO(),
 		bson.M{"node_id": NodeId},
 		bson.M{"$set": bson.M{"log_entry": bson.M{
-			"$slice": []interface{}{"$log_entry", logindex}}}})
+			"$slice": bson.A{"$log_entry", logindex}}}})
 	fmt.Println(result)
 	return err
 }
