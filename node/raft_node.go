@@ -265,9 +265,6 @@ func (r *RaftNode) commitLoop() {
 
 // Commit Function to commit the log entries
 func (r *RaftNode) commitEntries() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	//Followers Can Skip
 	if r.state != Leader {
 		return
@@ -297,12 +294,15 @@ func (r *RaftNode) commitEntries() {
 		//If majority has been reached, commit the entry
 		if r.hasMajority(count) {
 			r.commitIndex = i
+			r.logger.Log("CommitIndex updated to %d", i)
 			anyCommit = true
 		}
 	}
 
 	if anyCommit {
 		//TODO make Apply Function
+		r.logger.Log("CommitIndex was advanced, wakening up the apply loop")
+
 		r.applyCond.Broadcast()
 		for id, addr := range r.config.Members {
 			var temp int
@@ -311,7 +311,6 @@ func (r *RaftNode) commitEntries() {
 			}
 		}
 	}
-
 }
 
 func (r *RaftNode) applyLoop() {
