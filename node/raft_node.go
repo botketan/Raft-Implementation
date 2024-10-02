@@ -304,6 +304,12 @@ func (r *RaftNode) commitEntries() {
 	if anyCommit {
 		//TODO make Apply Function
 		r.applyCond.Broadcast()
+		for id, addr := range r.config.Members {
+			var temp int
+			if id != r.id {
+				go r.sendAppendEntries(id, addr, &temp)
+			}
+		}
 	}
 
 }
