@@ -251,6 +251,80 @@ func (r *RaftNode) heartbeatLoop() {
 	}
 }
 
+// Commit Loop to commit new entries
+func (r *RaftNode) commitLoop() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	defer r.wg.Done()
+
+	for r.state != Dead {
+		r.commitCond.Wait()
+		r.commitEntries()
+	}
+}
+
+// Commit Function to commit the log entries
+func (r *RaftNode) commitEntries() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	//Followers Can Skip
+	if r.state != Leader {
+		return
+	}
+
+	//Assuming No commit has happened
+	anyCommit := false
+
+	for i := r.commitIndex + 1; i < int64(len(r.log.entries)); i++ {
+
+		// Dont commit if the term is not the current term
+		if r.log.entries[i].Term != r.currentTerm {
+			continue
+		}
+
+		count := 1
+		for id, follower := range r.followersList {
+			//Skip the leader
+			if id == r.id {
+				continue
+			}
+			if follower.matchIndex >= i {
+				count++
+			}
+		}
+
+		//If majority has been reached, commit the entry
+		if r.hasMajority(count) {
+			r.commitIndex = i
+			anyCommit = true
+		}
+	}
+
+	if anyCommit {
+		//TODO make Apply Function
+		r.applyCond.Broadcast()
+		for id, addr := range r.config.Members {
+			var temp int
+			if id != r.id {
+				go r.sendAppendEntries(id, addr, &temp)
+			}
+		}
+	}
+
+}
+
+func (r *RaftNode) applyLoop() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	defer r.wg.Done()
+
+	for r.state != Dead {
+		r.applyCond.Wait()
+		// TODO: Apply the log entries to the state machine
+	}
+}
+
 // Starts the election , this should be called under thread safe conditions
 // Currently it is called after waiting on a condition, so its thread safe!
 func (r *RaftNode) startElection() {
@@ -641,10 +715,11 @@ func (r *RaftNode) Start() error {
 	r.lastContact = time.Now()
 
 	// TODO add the remaining loops
-	r.wg.Add(3)
+	r.wg.Add(4)
 	go r.electionClock()
 	go r.electionLoop()
 	go r.heartbeatLoop()
+	go r.commitLoop()
 
 	if err := r.node.Start(); err != nil {
 		return err
