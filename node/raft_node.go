@@ -376,6 +376,8 @@ func (r *RaftNode) SubmitOperation(operationBytes []byte, timeout time.Duration)
 
 	r.log.entries = append(r.log.entries, entry)
 
+	mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data)
+
 	r.operationManager.pendingReplicated[entry.Index] = operationFuture.responseCh
 
 	numResponses := 1
