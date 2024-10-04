@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"math/rand"
+	fsm "raft/fsm"
 	mongodb "raft/mongoDb"
 	pb "raft/protos"
 	"sync"
@@ -98,12 +99,14 @@ type RaftNode struct {
 	config      *Configuration
 
 	// Volatile states
-	commitIndex   int64
-	lastApplied   int64
-	leaderId      string
-	state         State
-	lastContact   time.Time                 // To store the last time some leader has contacted - used for handling timeouts
-	followersList map[string]*followerState // To map id to other follower state
+	commitIndex      int64
+	lastApplied      int64
+	leaderId         string
+	state            State
+	lastContact      time.Time                 // To store the last time some leader has contacted - used for handling timeouts
+	followersList    map[string]*followerState // To map id to other follower state
+	operationManager *operationManager         // Operation Manager to handle operations
+	fsm              fsm.FSM                   // State Machine to apply operations
 
 	node *Node
 	log  *Log
@@ -123,16 +126,18 @@ func InitRaftNode(ID string, address string, config *Configuration) (*RaftNode, 
 
 	// Initialize the RaftNode with default values
 	raft := &RaftNode{
-		id:            ID,
-		node:          node,
-		currentTerm:   0,
-		state:         Follower,
-		followersList: make(map[string]*followerState),
-		commitIndex:   -1,
-		lastApplied:   -1,
-		config:        config,
-		votedFor:      "",
-		log:           &Log{}, // Initialize log to prevent nil pointer dereference
+		id:               ID,
+		node:             node,
+		currentTerm:      0,
+		state:            Follower,
+		followersList:    make(map[string]*followerState),
+		commitIndex:      -1,
+		lastApplied:      -1,
+		config:           config,
+		votedFor:         "",
+		log:              &Log{},
+		operationManager: newOperationManager(), // Initialize log to prevent nil pointer dereference
+		fsm:              fsm.NewFSMManager(),
 	}
 
 	raft.applyCond = sync.NewCond(&raft.mu)
@@ -319,7 +324,29 @@ func (r *RaftNode) applyLoop() {
 
 	for r.state != Dead {
 		r.applyCond.Wait()
-		// TODO: Apply the log entries to the state machine
+		r.applyEntries()
+	}
+}
+
+func (r *RaftNode) applyEntries() {
+	for r.lastApplied < r.commitIndex {
+		r.lastApplied++
+		entry := r.log.entries[r.lastApplied]
+		r.logger.Log("Applying entry: %v", entry)
+		responseCh := r.operationManager.pendingReplicated[entry.Index]
+		delete(r.operationManager.pendingReplicated, entry.Index)
+		operation := Operation{
+			LogIndex: entry.Index,
+			LogTerm:  entry.Term,
+			Bytes:    entry.Data,
+		}
+		response := OperationResponse{
+			Operation:           operation,
+			ApplicationResponse: r.fsm.Apply(operation.Bytes),
+		}
+
+		responseCh <- &result[OperationResponse]{success: response, err: nil}
+		r.logger.Log("Applied entry: %v", entry)
 	}
 }
 
