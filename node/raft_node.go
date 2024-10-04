@@ -350,6 +350,46 @@ func (r *RaftNode) applyEntries() {
 	}
 }
 
+func (r *RaftNode) SubmitOperation(operationBytes []byte, timeout time.Duration) Future[OperationResponse] {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	operationFuture := newFuture[OperationResponse](timeout)
+
+	r.logger.Log("operation submitted: %s", string(operationBytes))
+	r.logger.Log("Current State: %s", r.state)
+
+	if r.state != Leader {
+		operationFuture.responseCh <- &result[OperationResponse]{err: fmt.Errorf("not a leader")}
+		return operationFuture
+	}
+
+	entry := LogEntry{
+		Index: int64(len(r.log.entries)),
+		Term:  r.currentTerm,
+		Data:  operationBytes,
+	}
+
+	r.log.entries = append(r.log.entries, entry)
+
+	r.operationManager.pendingReplicated[entry.Index] = operationFuture.responseCh
+
+	numResponses := 1
+	for id, address := range r.config.Members {
+		if id != r.id {
+			go r.sendAppendEntries(id, address, &numResponses)
+		}
+	}
+
+	r.logger.Log(
+		"operation submitted: logIndex = %d, logTerm = %d, type = %s",
+		entry.Index,
+		entry.Term,
+	)
+
+	return operationFuture
+}
+
 // Starts the election , this should be called under thread safe conditions
 // Currently it is called after waiting on a condition, so its thread safe!
 func (r *RaftNode) startElection() {

@@ -35,8 +35,6 @@ type OperationResponse struct {
 }
 
 type operationManager struct {
-	// Contains read-only operations waiting to be applied.
-	pendingReadOnly map[*Operation]chan Result[OperationResponse]
 
 	// Maps log index associated with the operation to its response channel.
 	pendingReplicated map[int64]chan Result[OperationResponse]
@@ -44,7 +42,6 @@ type operationManager struct {
 
 func newOperationManager() *operationManager {
 	return &operationManager{
-		pendingReadOnly:   make(map[*Operation]chan Result[OperationResponse]),
 		pendingReplicated: make(map[int64]chan Result[OperationResponse]),
 	}
 }
