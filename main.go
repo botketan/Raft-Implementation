@@ -34,22 +34,22 @@ func main() {
 	}
 
 	raft1.SetLog(&node.Log{})
-	raft1.GetLog().SetEntries([]node.LogEntry{
-		{Index: 0, Term: 1, Data: []byte("entry1")},
-		{Index: 1, Term: 1, Data: []byte("entry2")},
-		{Index: 2, Term: 1, Data: []byte("entry3")},
-		{Index: 3, Term: 2, Data: []byte("entry4")},
-		{Index: 4, Term: 2, Data: []byte("entry5")},
-		{Index: 5, Term: 3, Data: []byte("entry6")},
-		{Index: 6, Term: 3, Data: []byte("entry7")},
-		{Index: 7, Term: 3, Data: []byte("entry8")},
-	})
+	// raft1.GetLog().SetEntries([]node.LogEntry{
+	// 	// {Index: 0, Term: 1, Data: []byte("entry1")},
+	// 	// {Index: 1, Term: 1, Data: []byte("entry2")},
+	// 	// {Index: 2, Term: 1, Data: []byte("entry3")},
+	// 	// {Index: 3, Term: 2, Data: []byte("entry4")},
+	// 	// {Index: 4, Term: 2, Data: []byte("entry5")},
+	// 	// {Index: 5, Term: 3, Data: []byte("entry6")},
+	// 	// {Index: 6, Term: 3, Data: []byte("entry7")},
+	// 	// {Index: 7, Term: 3, Data: []byte("entry8")},
+	// })
 
 	raft2.SetLog(&node.Log{})
-	raft2.GetLog().SetEntries([]node.LogEntry{
-		{Index: 0, Term: 1, Data: []byte("entry1")},
-		{Index: 1, Term: 1, Data: []byte("entry2")},
-	})
+	// raft2.GetLog().SetEntries([]node.LogEntry{
+	// 	// {Index: 0, Term: 1, Data: []byte("entry1")},
+	// 	// {Index: 1, Term: 1, Data: []byte("entry2")},
+	// })
 
 	raft3.SetLog(&node.Log{})
 

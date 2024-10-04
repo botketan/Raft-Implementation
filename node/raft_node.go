@@ -324,6 +324,7 @@ func (r *RaftNode) applyLoop() {
 
 	for r.state != Dead {
 		r.applyCond.Wait()
+		r.logger.Log("Apply Loop Wake Up")
 		r.applyEntries()
 	}
 }
@@ -344,8 +345,11 @@ func (r *RaftNode) applyEntries() {
 			Operation:           operation,
 			ApplicationResponse: r.fsm.Apply(operation.Bytes),
 		}
-
-		responseCh <- &result[OperationResponse]{success: response, err: nil}
+		r.logger.Log("Reached here :%v", response)
+		select {
+		case responseCh <- &result[OperationResponse]{success: response, err: nil}:
+		default:
+		}
 		r.logger.Log("Applied entry: %v", entry)
 	}
 }
@@ -780,11 +784,12 @@ func (r *RaftNode) Start() error {
 	r.lastContact = time.Now()
 
 	// TODO add the remaining loops
-	r.wg.Add(4)
+	r.wg.Add(5)
 	go r.electionClock()
 	go r.electionLoop()
 	go r.heartbeatLoop()
 	go r.commitLoop()
+	go r.applyLoop()
 
 	if err := r.node.Start(); err != nil {
 		return err
