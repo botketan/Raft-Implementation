@@ -66,10 +66,11 @@ type LogEntry struct {
 	Index int64
 	Term  int64
 	Data  []byte
+	seqNo int64
 }
 
 func (e LogEntry) String() string {
-	return fmt.Sprintf("Index: %d, Term: %d, Data: %s", e.Index, e.Term, string(e.Data))
+	return fmt.Sprintf("Index: %d, Term: %d, Data: %s, SeqNo: %d", e.Index, e.Term, string(e.Data), e.seqNo)
 }
 
 type Log struct {
@@ -345,9 +346,14 @@ func (r *RaftNode) applyEntries() {
 			LogTerm:  entry.Term,
 			Bytes:    entry.Data,
 		}
+
+		clientReq := &fsm.ClientOperationRequest{
+			Operation: operation.Bytes,
+			SeqNo:     entry.seqNo,
+		}
 		response := OperationResponse{
 			Operation:           operation,
-			ApplicationResponse: r.fsm.Apply(operation.Bytes),
+			ApplicationResponse: r.fsm.Apply(clientReq),
 		}
 		r.logger.Log("Reached here :%s", response)
 		select {
@@ -358,14 +364,14 @@ func (r *RaftNode) applyEntries() {
 	}
 }
 
-func (r *RaftNode) SubmitOperation(operationBytes []byte, timeout time.Duration) Future[OperationResponse] {
+func (r *RaftNode) SubmitOperation(clientReq *fsm.ClientOperationRequest, timeout time.Duration) Future[OperationResponse] {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	operationFuture := newFuture[OperationResponse](timeout)
+	operationBytes := clientReq.Operation
 
-	r.logger.Log("operation submitted: %s", string(operationBytes))
-	r.logger.Log("Current State: %s", r.state)
+	r.logger.Log("operation submitted: %s, seqNo: %s", string(operationBytes), clientReq.SeqNo)
 
 	if r.state != Leader {
 		operationFuture.responseCh <- &result[OperationResponse]{err: fmt.Errorf("not a leader")}
@@ -376,11 +382,12 @@ func (r *RaftNode) SubmitOperation(operationBytes []byte, timeout time.Duration)
 		Index: int64(len(r.log.entries)),
 		Term:  r.currentTerm,
 		Data:  operationBytes,
+		seqNo: clientReq.SeqNo,
 	}
 
 	r.log.entries = append(r.log.entries, entry)
 
-	mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data)
+	mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.seqNo)
 
 	r.operationManager.pendingReplicated[entry.Index] = operationFuture.responseCh
 
@@ -392,9 +399,10 @@ func (r *RaftNode) SubmitOperation(operationBytes []byte, timeout time.Duration)
 	}
 
 	r.logger.Log(
-		"operation submitted: logIndex = %d, logTerm = %d, type = %s",
+		"operation submitted at logIndex = %d, logTerm = %d, seqNo = %d",
 		entry.Index,
 		entry.Term,
+		entry.seqNo,
 	)
 
 	return operationFuture
@@ -701,8 +709,9 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 				Index: entry.Index,
 				Term:  entry.Term,
 				Data:  entry.Data,
+				seqNo: entry.SeqNo,
 			}
-			mongodb.ChangeLog(*r.mongoClient, r.id, entry.Index, entry.Term, entry.Index, entry.Data)
+			mongodb.ChangeLog(*r.mongoClient, r.id, entry.Index, entry.Term, entry.Index, entry.Data, entry.SeqNo)
 
 		} else {
 			// Append new log entries
@@ -710,9 +719,10 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 				Index: entry.Index,
 				Term:  entry.Term,
 				Data:  entry.Data,
+				seqNo: entry.SeqNo,
 			})
 
-			mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data)
+			mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.SeqNo)
 		}
 	}
 
@@ -820,6 +830,7 @@ func convertToProtoEntries(entries []LogEntry) []*pb.LogEntry {
 			Index: entry.Index,
 			Term:  entry.Term,
 			Data:  entry.Data,
+			SeqNo: entry.seqNo,
 		})
 	}
 	return protoEntries

@@ -60,9 +60,22 @@ func main() {
 
 	<-time.After(time.Second * 2)
 	fmt.Println("Submitting more operations...")
-	ft1 := raft1.SubmitOperation([]byte("set x 5"), time.Second*5)
-	ft2 := raft2.SubmitOperation([]byte("set y 10"), time.Second*5)
-	ft3 := raft3.SubmitOperation([]byte("set z 15"), time.Second*5)
+	clReq1 := &fsm.ClientOperationRequest{
+		Operation: []byte("set x 5"),
+		SeqNo:     1,
+	}
+	clReq2 := &fsm.ClientOperationRequest{
+		Operation: []byte("set y 10"),
+		SeqNo:     2,
+	}
+	clReq3 := &fsm.ClientOperationRequest{
+		Operation: []byte("set z 15"),
+		SeqNo:     3,
+	}
+
+	ft1 := raft1.SubmitOperation(clReq1, time.Second*5)
+	ft2 := raft2.SubmitOperation(clReq2, time.Second*5)
+	ft3 := raft3.SubmitOperation(clReq3, time.Second*5)
 
 	result1 := ft1.Await()
 	result2 := ft2.Await()

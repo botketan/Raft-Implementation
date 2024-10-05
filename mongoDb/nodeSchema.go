@@ -28,6 +28,6 @@ type LogEntry struct {
 	// The data of the log entry.
 	Data []byte `bson:"data,omitempty"`
 
-	// The type of the log entry.
-	EntryType int32 `bson:"entry_type,omitempty"`
+	// The SeqNo sent by the client.
+	SeqNo int32 `bson:"seq_no,omitempty"`
 }
