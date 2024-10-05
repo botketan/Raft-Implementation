@@ -30,4 +30,7 @@ type LogEntry struct {
 
 	// The SeqNo sent by the client.
 	SeqNo int32 `bson:"seq_no,omitempty"`
+
+	// The ID of the client that submitted the request
+	ClientID string `bson:"client_id,omitempty"`
 }

@@ -63,14 +63,15 @@ type Configuration struct {
 }
 
 type LogEntry struct {
-	Index int64
-	Term  int64
-	Data  []byte
-	seqNo int64
+	Index    int64
+	Term     int64
+	Data     []byte
+	seqNo    int64
+	clientID string
 }
 
 func (e LogEntry) String() string {
-	return fmt.Sprintf("Index: %d, Term: %d, Data: %s, SeqNo: %d", e.Index, e.Term, string(e.Data), e.seqNo)
+	return fmt.Sprintf("Index: %d, Term: %d, Data: %s, SeqNo: %d, clientID: %s", e.Index, e.Term, string(e.Data), e.seqNo, e.clientID)
 }
 
 type Log struct {
@@ -187,9 +188,11 @@ func (r *RaftNode) restoreStates() error {
 	r.log.entries = []LogEntry{}
 	for _, entry := range NodeLog.LogEntries {
 		r.log.entries = append(r.log.entries, LogEntry{
-			Index: entry.Index,
-			Term:  entry.Term,
-			Data:  entry.Data,
+			Index:    entry.Index,
+			Term:     entry.Term,
+			Data:     entry.Data,
+			seqNo:    int64(entry.SeqNo),
+			clientID: entry.ClientID,
 		})
 	}
 
@@ -379,15 +382,16 @@ func (r *RaftNode) SubmitOperation(clientReq *fsm.ClientOperationRequest, timeou
 	}
 
 	entry := LogEntry{
-		Index: int64(len(r.log.entries)),
-		Term:  r.currentTerm,
-		Data:  operationBytes,
-		seqNo: clientReq.SeqNo,
+		Index:    int64(len(r.log.entries)),
+		Term:     r.currentTerm,
+		Data:     operationBytes,
+		seqNo:    clientReq.SeqNo,
+		clientID: clientReq.ClientID,
 	}
 
 	r.log.entries = append(r.log.entries, entry)
 
-	mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.seqNo)
+	mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.seqNo, entry.clientID)
 
 	r.operationManager.pendingReplicated[entry.Index] = operationFuture.responseCh
 
@@ -706,23 +710,25 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 		// If there is already an entry at this index, replace it (log overwrite protection)
 		if entry.Index < int64(len(r.log.entries)) {
 			r.log.entries[entry.Index] = LogEntry{
-				Index: entry.Index,
-				Term:  entry.Term,
-				Data:  entry.Data,
-				seqNo: entry.SeqNo,
+				Index:    entry.Index,
+				Term:     entry.Term,
+				Data:     entry.Data,
+				seqNo:    entry.SeqNo,
+				clientID: entry.ClientID,
 			}
-			mongodb.ChangeLog(*r.mongoClient, r.id, entry.Index, entry.Term, entry.Index, entry.Data, entry.SeqNo)
+			mongodb.ChangeLog(*r.mongoClient, r.id, entry.Index, entry.Term, entry.Index, entry.Data, entry.SeqNo, entry.ClientID)
 
 		} else {
 			// Append new log entries
 			r.log.entries = append(r.log.entries, LogEntry{
-				Index: entry.Index,
-				Term:  entry.Term,
-				Data:  entry.Data,
-				seqNo: entry.SeqNo,
+				Index:    entry.Index,
+				Term:     entry.Term,
+				Data:     entry.Data,
+				seqNo:    entry.SeqNo,
+				clientID: entry.ClientID,
 			})
 
-			mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.SeqNo)
+			mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.SeqNo, entry.ClientID)
 		}
 	}
 
@@ -827,10 +833,11 @@ func convertToProtoEntries(entries []LogEntry) []*pb.LogEntry {
 	var protoEntries []*pb.LogEntry
 	for _, entry := range entries {
 		protoEntries = append(protoEntries, &pb.LogEntry{
-			Index: entry.Index,
-			Term:  entry.Term,
-			Data:  entry.Data,
-			SeqNo: entry.seqNo,
+			Index:    entry.Index,
+			Term:     entry.Term,
+			Data:     entry.Data,
+			SeqNo:    entry.seqNo,
+			ClientID: entry.clientID,
 		})
 	}
 	return protoEntries

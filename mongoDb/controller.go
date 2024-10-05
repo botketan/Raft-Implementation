@@ -28,27 +28,29 @@ func GetNodeLog(client mongo.Client, NodeId string) (NodeLog, error) {
 	return node, err
 }
 
-func AddLog(client mongo.Client, NodeId string, term int64, index int64, data []byte, seqNo int64) error {
+func AddLog(client mongo.Client, NodeId string, term int64, index int64, data []byte, seqNo int64, clientID string) error {
 	db := client.Database("raft")
 	Collection := db.Collection("NodeLog")
 	_, err := Collection.UpdateOne(context.TODO(),
 		bson.M{"node_id": NodeId},
 		bson.M{"$push": bson.M{"log_entry": bson.M{"index": index,
-			"term":   term,
-			"data":   data,
-			"seq_no": seqNo}}})
+			"term":      term,
+			"data":      data,
+			"seq_no":    seqNo,
+			"client_id": clientID}}})
 	return err
 }
 
-func ChangeLog(client mongo.Client, NodeId string, logindex int64, term int64, index int64, data []byte, seqNo int64) error {
+func ChangeLog(client mongo.Client, NodeId string, logindex int64, term int64, index int64, data []byte, seqNo int64, clientID string) error {
 	db := client.Database("raft")
 	Collection := db.Collection("NodeLog")
 	_, err := Collection.UpdateOne(context.TODO(),
 		bson.M{"node_id": NodeId},
 		bson.M{"$set": bson.M{("log_entry." + fmt.Sprint(logindex) + ".data"): data,
-			("log_entry." + fmt.Sprint(logindex) + ".term"):   term,
-			("log_entry." + fmt.Sprint(logindex) + ".index"):  index,
-			("log_entry." + fmt.Sprint(logindex) + ".seq_no"): seqNo,
+			("log_entry." + fmt.Sprint(logindex) + ".term"):      term,
+			("log_entry." + fmt.Sprint(logindex) + ".index"):     index,
+			("log_entry." + fmt.Sprint(logindex) + ".seq_no"):    seqNo,
+			("log_entry." + fmt.Sprint(logindex) + ".client_id"): clientID,
 		}})
 	return err
 }

@@ -10,5 +10,6 @@ type FSM interface {
 // Contains the sequence number to avoid re-applying again
 type ClientOperationRequest struct {
 	SeqNo     int64
+	ClientID  string
 	Operation []byte
 }

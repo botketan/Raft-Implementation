@@ -25,11 +25,11 @@ func (t Type) String() string {
 	}
 }
 
-// Stores the last applied result and returns the response
+// Stores the last applied result and the corresponding sequence number
 // So that things doesnt get applied twice
 type lastApplied struct {
 	sequenceNo int64
-	lastResult []byte
+	lastResult interface{}
 }
 
 // Tells us about the command if it was a get or set
@@ -45,8 +45,8 @@ type FSMManager struct {
 	// Key -> value Map
 	kvmap map[string]string
 
-	// Node id -> lastApplied map
-	sessionMap map[string]lastApplied
+	// Client ID (different from Raft node id) -> lastApplied map
+	sessionMap map[string]*lastApplied
 
 	mu sync.RWMutex
 }
@@ -54,7 +54,7 @@ type FSMManager struct {
 func NewFSMManager() *FSMManager {
 	return &FSMManager{
 		kvmap:      make(map[string]string),
-		sessionMap: make(map[string]lastApplied),
+		sessionMap: make(map[string]*lastApplied),
 	}
 }
 
@@ -91,6 +91,7 @@ func (f *FSMManager) decodeOperation(op []byte) (command, error) {
 func (f *FSMManager) HandleGet(key string) interface{} {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
+
 	val, ok := f.kvmap[key]
 
 	if !ok {
@@ -100,12 +101,26 @@ func (f *FSMManager) HandleGet(key string) interface{} {
 	return val
 }
 
-func (f *FSMManager) HandleSet(key string, value string) interface{} {
+func (f *FSMManager) HandleSet(key string, value string, clientId string, seqNo int64) interface{} {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	sesh, ok := f.sessionMap[clientId]
+
+	if ok && sesh.sequenceNo >= seqNo {
+		fmt.Printf("Incoming SeqNo: %d, Found in session store SeqNo: %d\n", seqNo, sesh.sequenceNo)
+		return sesh.lastResult
+	}
+
+	if !ok {
+		f.sessionMap[clientId] = &lastApplied{}
+	}
+
 	f.kvmap[key] = value
-	return fmt.Sprintf("Successfully set {Key: %s, Value: %s} in KVStore", key, value)
+	resp := fmt.Sprintf("Successfully set {Key: %s, Value: %s} in KVStore", key, value)
+	f.sessionMap[clientId].sequenceNo = seqNo
+	f.sessionMap[clientId].lastResult = resp
+	return resp
 }
 
 // Applies the operation to the FSM
@@ -120,8 +135,8 @@ func (f *FSMManager) Apply(clientReq *ClientOperationRequest) interface{} {
 	case Get:
 		return f.HandleGet(command.key)
 	case Set:
-		return f.HandleSet(command.key, command.value)
+		return f.HandleSet(command.key, command.value, clientReq.ClientID, clientReq.SeqNo)
 	default:
-		return fmt.Errorf("unknown operation %s, please try again", string(clientReq.Operation))
+		return fmt.Errorf("unknown operation %s by clientID: %s, please try again", string(clientReq.Operation), clientReq.ClientID)
 	}
 }
