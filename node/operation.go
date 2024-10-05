@@ -1,5 +1,7 @@
 package node
 
+import "fmt"
+
 type Operation struct {
 	Bytes []byte
 	// The log entry index associated with the operation.
@@ -9,10 +11,13 @@ type Operation struct {
 	// The log entry term associated with the operation.
 	// Valid only if this is a replicated operation and the operation was successful.
 	LogTerm int64
+}
 
-	// The commit index at the time the operation was submitted. Only applicable to
-	// linearizable and lease-based read-only operations.
-	readIndex int64
+func (o Operation) String() string {
+	return fmt.Sprintf(
+		"Operation{Bytes: %s, LogIndex: %d, LogTerm: %d}",
+		string(o.Bytes), o.LogIndex, o.LogTerm,
+	)
 }
 
 type Result[T OperationResponse] interface {
@@ -32,6 +37,13 @@ type OperationResponse struct {
 
 	// The response returned by the state machine after applying the operation.
 	ApplicationResponse interface{}
+}
+
+func (r OperationResponse) String() string {
+	return fmt.Sprintf(
+		"OperationResponse{Operation: %s, ApplicationResponse: %v}",
+		r.Operation.String(), r.ApplicationResponse,
+	)
 }
 
 type operationManager struct {

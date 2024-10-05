@@ -2,6 +2,7 @@ package node_test
 
 import (
 	"fmt"
+	"raft/fsm"
 	"raft/node"
 	pb "raft/protos"
 	"testing"
@@ -17,7 +18,7 @@ func setupRaftNode() *node.RaftNode {
 			"node3": "localhost:5003",
 		},
 	}
-	raftNode, err := node.InitRaftNode("node1", "localhost:5001", config)
+	raftNode, err := node.InitRaftNode("node1", "localhost:5001", config, fsm.NewFSMManager())
 	if err != nil {
 		fmt.Println("Error initializing Raft node:", err)
 	}

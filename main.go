@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"raft/fsm"
 	"raft/node"
 	r "raft/node"
 	"syscall"
@@ -20,15 +21,15 @@ func main() {
 			"3": "localhost:8021",
 		},
 	}
-	raft1, err := r.InitRaftNode("1", "localhost:8000", config)
+	raft1, err := r.InitRaftNode("1", "localhost:8000", config, fsm.NewFSMManager())
 	if err != nil {
 		panic(err)
 	}
-	raft2, err := r.InitRaftNode("2", "localhost:8005", config)
+	raft2, err := r.InitRaftNode("2", "localhost:8005", config, fsm.NewFSMManager())
 	if err != nil {
 		panic(err)
 	}
-	raft3, err := r.InitRaftNode("3", "localhost:8021", config)
+	raft3, err := r.InitRaftNode("3", "localhost:8021", config, fsm.NewFSMManager())
 	if err != nil {
 		panic(err)
 	}

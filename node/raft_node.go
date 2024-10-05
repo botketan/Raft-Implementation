@@ -68,16 +68,20 @@ type LogEntry struct {
 	Data  []byte
 }
 
+func (e LogEntry) String() string {
+	return fmt.Sprintf("Index: %d, Term: %d, Data: %s", e.Index, e.Term, string(e.Data))
+}
+
 type Log struct {
 	entries []LogEntry
 }
 
-func (l *Log) LogInLogger(logger *Logger) {
-	logger.Log("*******************************************")
-	for i, entry := range l.entries {
-		logger.Log("Log Entry %d: Index=%d, Term=%d, Data=%s\n", i, entry.Index, entry.Term, string(entry.Data))
+func (l Log) String() string {
+	var result string
+	for _, entry := range l.entries {
+		result += entry.String() + "\n"
 	}
-	logger.Log("*******************************************")
+	return result
 }
 
 type RaftNode struct {
@@ -118,7 +122,7 @@ type RaftNode struct {
 	logger Logger
 }
 
-func InitRaftNode(ID string, address string, config *Configuration) (*RaftNode, error) {
+func InitRaftNode(ID string, address string, config *Configuration, fsm fsm.FSM) (*RaftNode, error) {
 	node, err := InitNode(address)
 	if err != nil {
 		return nil, err
@@ -137,7 +141,7 @@ func InitRaftNode(ID string, address string, config *Configuration) (*RaftNode, 
 		votedFor:         "",
 		log:              &Log{},
 		operationManager: newOperationManager(), // Initialize log to prevent nil pointer dereference
-		fsm:              fsm.NewFSMManager(),
+		fsm:              fsm,                   // FSM to get the logs
 	}
 
 	raft.applyCond = sync.NewCond(&raft.mu)
@@ -333,7 +337,7 @@ func (r *RaftNode) applyEntries() {
 	for r.lastApplied < r.commitIndex {
 		r.lastApplied++
 		entry := r.log.entries[r.lastApplied]
-		r.logger.Log("Applying entry: %v", entry)
+		r.logger.Log("Applying entry: %s", entry)
 		responseCh := r.operationManager.pendingReplicated[entry.Index]
 		delete(r.operationManager.pendingReplicated, entry.Index)
 		operation := Operation{
@@ -345,12 +349,12 @@ func (r *RaftNode) applyEntries() {
 			Operation:           operation,
 			ApplicationResponse: r.fsm.Apply(operation.Bytes),
 		}
-		r.logger.Log("Reached here :%v", response)
+		r.logger.Log("Reached here :%s", response)
 		select {
 		case responseCh <- &result[OperationResponse]{success: response, err: nil}:
 		default:
 		}
-		r.logger.Log("Applied entry: %v", entry)
+		r.logger.Log("Applied entry: %s", entry)
 	}
 }
 
@@ -565,7 +569,7 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 	resp, err := r.node.SendAppendEntriesRPC(addr, req)
 	r.mu.Lock()
 
-	r.logger.Log("received AppendEntries Response from Node %s with Term: %d, ConflictIndex: %d, ConflictTerm: %d, Success: %s", id, resp.GetTerm(), resp.GetConflictIndex(), resp.GetConflictTerm(), resp.GetSuccess())
+	r.logger.Log("received AppendEntries Response from Node %s with Term: %d, ConflictIndex: %d, ConflictTerm: %d, Success: %v", id, resp.GetTerm(), resp.GetConflictIndex(), resp.GetConflictTerm(), resp.GetSuccess())
 
 	if r.state != Leader || err != nil {
 		return
@@ -712,8 +716,7 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 		}
 	}
 
-	// DEBUG
-	r.log.LogInLogger(&r.logger)
+	r.logger.Log("Log Entries:\n%s", r.log)
 
 	// Update commit index if leaderCommit is greater than our commitIndex
 	if req.LeaderCommit > r.commitIndex {
@@ -785,7 +788,6 @@ func (r *RaftNode) Start() error {
 	r.state = Follower
 	r.lastContact = time.Now()
 
-	// TODO add the remaining loops
 	r.wg.Add(5)
 	go r.electionClock()
 	go r.electionLoop()
