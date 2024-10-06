@@ -15,11 +15,11 @@ import (
 
 // RaftClient defines the client structure to interact with the Raft cluster.
 type RaftClient struct {
-	clientID      string   // Unique ID for this client
-	seqNo         int64    // Sequence number for operations
-	leaderID      string   // Current known leader ID
-	raftNodes     map[string]string // Map of all known Raft node addresses
-	clientsList   map[string]pb.RaftClient // Map of client connections to Raft nodes
+	clientID    string                   // Unique ID for this client
+	seqNo       int64                    // Sequence number for operations
+	leaderID    string                   // Current known leader ID
+	raftNodes   map[string]string        // Map of all known Raft node addresses
+	clientsList map[string]pb.RaftClient // Map of client connections to Raft nodes
 }
 
 // NewRaftClient creates a new RaftClient with a unique clientID and list of node addresses.
@@ -28,18 +28,18 @@ func NewRaftClient(clientID string, nodes map[string]string) (*RaftClient, error
 	for id, address := range nodes {
 		conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
-			return nil, err;
+			return nil, err
 		}
 		defer conn.Close()
 
 		clients[id] = pb.NewRaftClient(conn)
 	}
 	return &RaftClient{
-		clientID:      clientID,
-		seqNo:         0, // Initialize sequence number to 0
-		raftNodes:     nodes,
-		leaderID: "", // Initially, the leader is unknown
-		clientsList:   clients,
+		clientID:    clientID,
+		seqNo:       0, // Initialize sequence number to 0
+		raftNodes:   nodes,
+		leaderID:    "", // Initially, the leader is unknown
+		clientsList: clients,
 	}, nil
 }
 
@@ -65,14 +65,16 @@ func (client *RaftClient) SubmitOperation(op []byte, timeout time.Duration) (str
 
 		// If leader is unknown or submission to leader failed, try all nodes
 		for node := range client.raftNodes {
+			log.Printf("Sending to %v\n", node)
 			response, err = client.submit(node, op)
+			log.Printf("Got response: %v, err: %v\n", response, err)
 			if err == nil {
 				return response, nil
 			}
 
 			// If the node redirected us to a new leader, retry with the new leader
 			if client.leaderID != "" {
-				log.Printf("Discovered new leader at %s", client.leaderID)
+				log.Printf("Client Discovered new leader at %s", client.leaderID)
 				break
 			}
 		}
@@ -91,8 +93,8 @@ func (client *RaftClient) submit(leaderID string, op []byte) (string, error) {
 	client.seqNo++
 
 	req := &pb.SubmitOperationRequest{
-		ClientId: client.clientID,
-		SeqNo:    client.seqNo,
+		ClientId:  client.clientID,
+		SeqNo:     client.seqNo,
 		Operation: op,
 	}
 
@@ -112,4 +114,34 @@ func (client *RaftClient) submit(leaderID string, op []byte) (string, error) {
 
 	log.Printf("Operation successfully submitted and committed: %s", resp.GetMessage())
 	return resp.GetMessage(), nil
+}
+
+func SimulateClientCommands(client *RaftClient) {
+	<-time.After(time.Second * 2)
+	log.Printf("Submitting operations...")
+	resp, err := client.SubmitOperation([]byte("GET X"), 2*time.Minute)
+	if err != nil {
+		fmt.Printf("Error for GET X : %v\n", err)
+	} else {
+		fmt.Printf("Response for GET X : %v\n", resp)
+	}
+	resp, err = client.SubmitOperation([]byte("SET X fuckyou"), 2*time.Minute)
+	if err != nil {
+		fmt.Printf("Error for SET X: %v\n", err)
+	} else {
+		fmt.Printf("Response for SET X: %v\n", resp)
+	}
+	<-time.After(time.Second * 1)
+	resp, err = client.SubmitOperation([]byte("GET X"), 2*time.Minute)
+	if err != nil {
+		fmt.Printf("Error for GET X: %v\n", err)
+	} else {
+		fmt.Printf("Response for GET X: %v\n", resp)
+	}
+	resp, err = client.SubmitOperation([]byte("GET X"), 2*time.Minute)
+	if err != nil {
+		fmt.Printf("Error for GET X: %v\n", err)
+	} else {
+		fmt.Printf("Response for GET X: %v\n", resp)
+	}
 }

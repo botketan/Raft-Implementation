@@ -370,9 +370,15 @@ func (r *RaftNode) applyEntries() {
 // Submit operation RPC handler
 func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *pb.SubmitOperationResponse) error {
 
+	r.logger.Log("Received Submit Operation from Client : %v", req.String())
+
 	if r.state != Leader {
 		resp.Success = false
-		resp.Message = "REDIRECT " + r.leaderId
+		if r.leaderId != "" {
+			resp.Message = "REDIRECT " + r.leaderId
+		} else {
+			resp.Message = "Not a Leader, and Leader Unknown"
+		}
 		return nil
 	}
 

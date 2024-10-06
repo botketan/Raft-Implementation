@@ -112,6 +112,8 @@ func (f *FSMManager) HandleSet(key string, value string, clientId string, seqNo 
 		return sesh.lastResult
 	}
 
+	fmt.Printf("Incoming SeqNo: %d, not found in session store. Serving Fresh!\n", seqNo)
+
 	if !ok {
 		f.sessionMap[clientId] = &lastApplied{}
 	}
