@@ -30,7 +30,6 @@ func NewRaftClient(clientID string, nodes map[string]string) (*RaftClient, error
 		if err != nil {
 			return nil, err
 		}
-		defer conn.Close()
 
 		clients[id] = pb.NewRaftClient(conn)
 	}
@@ -88,20 +87,20 @@ func (client *RaftClient) submit(leaderID string, op []byte) (string, error) {
 	raftClient := client.clientsList[leaderID]
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	// Increment the sequence number for each operation
-	client.seqNo++
-
+	
 	req := &pb.SubmitOperationRequest{
 		ClientId:  client.clientID,
 		SeqNo:     client.seqNo,
 		Operation: op,
 	}
-
+	
 	resp, err := raftClient.SubmitOperation(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("failed to submit operation: %v", err)
 	}
+
+	// Increment the sequence number if the operation was submitted successfully
+	client.seqNo++
 
 	if !resp.GetSuccess() {
 		// If the node we contacted is not the leader, it provides the correct leader address
@@ -109,10 +108,11 @@ func (client *RaftClient) submit(leaderID string, op []byte) (string, error) {
 			client.leaderID = strings.TrimPrefix(resp.GetMessage(), "REDIRECT ")
 			return "REDIRECT", fmt.Errorf("redirected to new leader at %s", client.leaderID)
 		}
-		return "", fmt.Errorf("operation submission failed: %v", resp.GetMessage())
+		return "", fmt.Errorf("operation submission returned error: %v", resp.GetMessage())
 	}
-
+	
 	log.Printf("Operation successfully submitted and committed: %s", resp.GetMessage())
+
 	return resp.GetMessage(), nil
 }
 
