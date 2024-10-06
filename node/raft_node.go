@@ -367,6 +367,36 @@ func (r *RaftNode) applyEntries() {
 	}
 }
 
+// Submit operation RPC handler
+func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *pb.SubmitOperationResponse) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state != Leader {
+		resp.Success = false
+		return nil
+	}
+
+	clientReq := &fsm.ClientOperationRequest{
+		Operation: req.Operation,
+		SeqNo:     req.SeqNo,
+		ClientID:  req.ClientId,
+	}
+
+	operationFuture := r.SubmitOperation(clientReq, 500*time.Millisecond)
+	// Wait for the operation to be replicated
+	operationResult := operationFuture.Await()
+	if operationResult.Error() != nil {
+		resp.Success = false
+		return nil
+	}
+
+	resp.Success = true
+	resp.Message = "Operation submitted successfully"
+
+	return nil
+}
+
 func (r *RaftNode) SubmitOperation(clientReq *fsm.ClientOperationRequest, timeout time.Duration) Future[OperationResponse] {
 	r.mu.Lock()
 	defer r.mu.Unlock()

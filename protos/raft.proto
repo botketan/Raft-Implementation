@@ -38,7 +38,19 @@ message RequestVoteResponse {
     bool   vote_granted = 2;
 }
 
+message SubmitOperationRequest {
+    string client_id = 1;
+    int64 seq_no     = 2;
+    bytes operation  = 3;
+}
+
+message SubmitOperationResponse {
+    bool success   = 1;
+    string message = 2;
+}
+
 service Raft {
     rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse) {}
     rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse) {}
+    rpc SubmitOperation(SubmitOperationRequest) returns (SubmitOperationResponse) {}
 }
