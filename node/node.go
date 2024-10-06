@@ -80,6 +80,7 @@ type Node struct {
 	// RPC Handlers (to be registered in main raft node)
 	appendEntriesHandler func(*pb.AppendEntriesRequest, *pb.AppendEntriesResponse) error
 	requestVoteHandler   func(*pb.RequestVoteRequest, *pb.RequestVoteResponse) error
+	submitOperationHandler func(*pb.SubmitOperationRequest, *pb.SubmitOperationResponse) error
 }
 
 func InitNode(addr string) (*Node, error) {
@@ -104,6 +105,12 @@ func (n *Node) registerRequestVoteHandler(
 	handler func(*pb.RequestVoteRequest, *pb.RequestVoteResponse) error,
 ) {
 	n.requestVoteHandler = handler
+}
+
+func (n *Node) registerSubmitOperationHandler(
+	handler func(*pb.SubmitOperationRequest, *pb.SubmitOperationResponse) error,
+) {
+	n.submitOperationHandler = handler
 }
 
 // Wrapper functions to send RPCs
@@ -163,6 +170,15 @@ func (n *Node) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) 
 	err := n.appendEntriesHandler(req, resp)
 	if err != nil {
 		return &pb.AppendEntriesResponse{}, status.Error(codes.Unavailable, err.Error())
+	}
+	return resp, nil
+}
+
+func (n *Node) SubmitOperation(ctx context.Context, req *pb.SubmitOperationRequest) (*pb.SubmitOperationResponse, error) {
+	resp := &pb.SubmitOperationResponse{}
+	err := n.submitOperationHandler(req, resp)
+	if err != nil {
+		return &pb.SubmitOperationResponse{}, status.Error(codes.Unavailable, err.Error())
 	}
 	return resp, nil
 }

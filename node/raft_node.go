@@ -374,6 +374,7 @@ func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *
 
 	if r.state != Leader {
 		resp.Success = false
+		resp.Message = "REDIRECT " + r.leaderId
 		return nil
 	}
 
@@ -392,7 +393,7 @@ func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *
 	}
 
 	resp.Success = true
-	resp.Message = "Operation submitted successfully"
+	resp.Message = operationResult.Success().String()
 
 	return nil
 }
