@@ -374,6 +374,7 @@ func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *
 
 	if r.state != Leader {
 		resp.Success = false
+		resp.Message = "REDIRECT " + r.leaderId
 		return nil
 	}
 
