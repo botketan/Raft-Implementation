@@ -35,7 +35,7 @@ func NewRaftClient(clientID string, nodes map[string]string) (*RaftClient, error
 	}
 	return &RaftClient{
 		clientID:    clientID,
-		seqNo:       0, // Initialize sequence number to 0
+		seqNo:       1, // Initialize sequence number to 1
 		raftNodes:   nodes,
 		leaderID:    "", // Initially, the leader is unknown
 		clientsList: clients,
@@ -44,6 +44,11 @@ func NewRaftClient(clientID string, nodes map[string]string) (*RaftClient, error
 
 // SubmitOperation submits an operation to the Raft cluster with a clientID and seqNo.
 func (client *RaftClient) SubmitOperation(op []byte, timeout time.Duration) (string, error) {
+	defer func() {
+		// Increase sequence number after every successful response
+		client.seqNo++
+	}()
+
 	var err error
 	var response string
 
@@ -64,9 +69,8 @@ func (client *RaftClient) SubmitOperation(op []byte, timeout time.Duration) (str
 
 		// If leader is unknown or submission to leader failed, try all nodes
 		for node := range client.raftNodes {
-			log.Printf("Sending to %v\n", node)
 			response, err = client.submit(node, op)
-			log.Printf("Got response: %v, err: %v\n", response, err)
+			log.Printf("Got response: %v, err: %v from Server ID: %v\n\n", response, err, node)
 			if err == nil {
 				return response, nil
 			}
@@ -87,20 +91,19 @@ func (client *RaftClient) submit(leaderID string, op []byte) (string, error) {
 	raftClient := client.clientsList[leaderID]
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	req := &pb.SubmitOperationRequest{
 		ClientId:  client.clientID,
 		SeqNo:     client.seqNo,
 		Operation: op,
 	}
-	
+
+	log.Printf("Sending Operation {%v} to Server ID: %v\n\n", req, leaderID)
+
 	resp, err := raftClient.SubmitOperation(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("failed to submit operation: %v", err)
 	}
-
-	// Increment the sequence number if the operation was submitted successfully
-	client.seqNo++
 
 	if !resp.GetSuccess() {
 		// If the node we contacted is not the leader, it provides the correct leader address
@@ -110,8 +113,6 @@ func (client *RaftClient) submit(leaderID string, op []byte) (string, error) {
 		}
 		return "", fmt.Errorf("operation submission returned error: %v", resp.GetMessage())
 	}
-	
-	log.Printf("Operation successfully submitted and committed: %s", resp.GetMessage())
 
 	return resp.GetMessage(), nil
 }
@@ -121,27 +122,27 @@ func SimulateClientCommands(client *RaftClient) {
 	log.Printf("Submitting operations...")
 	resp, err := client.SubmitOperation([]byte("GET X"), 2*time.Minute)
 	if err != nil {
-		fmt.Printf("Error for GET X : %v\n", err)
+		fmt.Printf("Error for GET X : %v\n\n", err)
 	} else {
-		fmt.Printf("Response for GET X : %v\n", resp)
+		fmt.Printf("Response for GET X : %v\n\n", resp)
 	}
-	resp, err = client.SubmitOperation([]byte("SET X fuckyou"), 2*time.Minute)
+	resp, err = client.SubmitOperation([]byte("SET X 5"), 2*time.Minute)
 	if err != nil {
-		fmt.Printf("Error for SET X: %v\n", err)
+		fmt.Printf("Error for SET X: %v\n\n", err)
 	} else {
-		fmt.Printf("Response for SET X: %v\n", resp)
+		fmt.Printf("Response for SET X: %v\n\n", resp)
 	}
 	<-time.After(time.Second * 1)
 	resp, err = client.SubmitOperation([]byte("GET X"), 2*time.Minute)
 	if err != nil {
-		fmt.Printf("Error for GET X: %v\n", err)
+		fmt.Printf("Error for GET X: %v\n\n", err)
 	} else {
-		fmt.Printf("Response for GET X: %v\n", resp)
+		fmt.Printf("Response for GET X: %v\n\n", resp)
 	}
 	resp, err = client.SubmitOperation([]byte("GET X"), 2*time.Minute)
 	if err != nil {
-		fmt.Printf("Error for GET X: %v\n", err)
+		fmt.Printf("Error for GET X: %v\n\n", err)
 	} else {
-		fmt.Printf("Response for GET X: %v\n", resp)
+		fmt.Printf("Response for GET X: %v\n\n", resp)
 	}
 }

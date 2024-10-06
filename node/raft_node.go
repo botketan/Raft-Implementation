@@ -26,7 +26,7 @@ const (
 )
 
 const (
-	electionTimeout  = time.Duration(500 * time.Millisecond)
+	electionTimeout  = time.Duration(300 * time.Millisecond)
 	heartbeatTimeout = time.Duration(50 * time.Millisecond)
 )
 
@@ -379,7 +379,7 @@ func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *
 		} else {
 			resp.Message = "Not a Leader, and Leader Unknown"
 		}
-		return fmt.Errorf("not a leader")
+		return nil
 	}
 
 	clientReq := &fsm.ClientOperationRequest{
