@@ -379,7 +379,7 @@ func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *
 		} else {
 			resp.Message = "Not a Leader, and Leader Unknown"
 		}
-		return nil
+		return fmt.Errorf("not a leader")
 	}
 
 	clientReq := &fsm.ClientOperationRequest{
