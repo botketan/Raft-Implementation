@@ -99,24 +99,3 @@ func (client *RaftClient) submitToLeader(leaderAddress string, op []byte) error 
 	log.Printf("Operation successfully submitted and committed: %s", resp.GetMessage())
 	return nil
 }
-
-func main() {
-	// List of known Raft node addresses
-	nodes := []string{
-		"localhost:5001",
-		"localhost:5002",
-		"localhost:5003",
-	}
-
-	// Create a new Raft client with a unique clientID
-	client := NewRaftClient("client1", nodes)
-
-	// Operation to be submitted to the Raft cluster
-	operation := []byte("SET key=value")
-
-	// Submit the operation
-	err := client.SubmitOperation(operation)
-	if err != nil {
-		log.Fatalf("Failed to submit operation: %v", err)
-	}
-}
