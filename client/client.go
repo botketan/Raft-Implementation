@@ -17,59 +17,73 @@ import (
 type RaftClient struct {
 	clientID      string   // Unique ID for this client
 	seqNo         int64    // Sequence number for operations
-	leaderAddress string   // Current known leader address
-	raftNodes     []string // All known Raft node addresses
+	leaderID      string   // Current known leader ID
+	raftNodes     map[string]string // Map of all known Raft node addresses
+	clientsList   map[string]pb.RaftClient // Map of client connections to Raft nodes
 }
 
 // NewRaftClient creates a new RaftClient with a unique clientID and list of node addresses.
-func NewRaftClient(clientID string, nodes []string) *RaftClient {
+func NewRaftClient(clientID string, nodes map[string]string) (*RaftClient, error) {
+	clients := make(map[string]pb.RaftClient, len(nodes))
+	for id, address := range nodes {
+		conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, err;
+		}
+		defer conn.Close()
+
+		clients[id] = pb.NewRaftClient(conn)
+	}
 	return &RaftClient{
 		clientID:      clientID,
 		seqNo:         0, // Initialize sequence number to 0
 		raftNodes:     nodes,
-		leaderAddress: "", // Initially, the leader is unknown
-	}
+		leaderID: "", // Initially, the leader is unknown
+		clientsList:   clients,
+	}, nil
 }
 
 // SubmitOperation submits an operation to the Raft cluster with a clientID and seqNo.
-func (client *RaftClient) SubmitOperation(op []byte) error {
+func (client *RaftClient) SubmitOperation(op []byte, timeout time.Duration) (string, error) {
 	var err error
+	var response string
 
-	for {
+	for start := time.Now(); time.Since(start) < timeout; {
 		// If the leader is known, try submitting to the leader
-		if client.leaderAddress != "" {
-			err = client.submit(client.leaderAddress, op)
-			if err == nil {
-				return nil
+		if client.leaderID != "" {
+			response, err = client.submit(client.leaderID, op)
+			if response == "REDIRECT" {
+				log.Printf("Redirected to new leader at %s", client.leaderID)
+				continue
 			}
-			log.Printf("Failed to submit to leader at %s: %v", client.leaderAddress, err)
+			if err == nil {
+				return response, nil
+			}
+			client.leaderID = "" // Reset leader if submission to leader failed
+			log.Printf("Failed to submit to leader at %s: %v", client.leaderID, err)
 		}
 
 		// If leader is unknown or submission to leader failed, try all nodes
-		for _, node := range client.raftNodes {
-			err = client.submit(node, op)
+		for node := range client.raftNodes {
+			response, err = client.submit(node, op)
 			if err == nil {
-				return nil
+				return response, nil
 			}
 
 			// If the node redirected us to a new leader, retry with the new leader
-			if client.leaderAddress != "" {
-				log.Printf("Discovered new leader at %s", client.leaderAddress)
+			if client.leaderID != "" {
+				log.Printf("Discovered new leader at %s", client.leaderID)
 				break
 			}
 		}
 	}
+
+	return "", fmt.Errorf("timeout while submitting operation: %v", err)
 }
 
 // submit tries to submit the operation to the current leader node.
-func (client *RaftClient) submit(leaderAddress string, op []byte) error {
-	conn, err := grpc.NewClient(leaderAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return fmt.Errorf("failed to connect to leader: %v", err)
-	}
-	defer conn.Close()
-
-	raftClient := pb.NewRaftClient(conn)
+func (client *RaftClient) submit(leaderID string, op []byte) (string, error) {
+	raftClient := client.clientsList[leaderID]
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -84,18 +98,18 @@ func (client *RaftClient) submit(leaderAddress string, op []byte) error {
 
 	resp, err := raftClient.SubmitOperation(ctx, req)
 	if err != nil {
-		return fmt.Errorf("failed to submit operation: %v", err)
+		return "", fmt.Errorf("failed to submit operation: %v", err)
 	}
 
 	if !resp.GetSuccess() {
 		// If the node we contacted is not the leader, it provides the correct leader address
 		if strings.HasPrefix(resp.GetMessage(), "REDIRECT") {
-			client.leaderAddress = strings.TrimPrefix(resp.GetMessage(), "REDIRECT ")
-			return fmt.Errorf("redirected to new leader at %s", client.leaderAddress)
+			client.leaderID = strings.TrimPrefix(resp.GetMessage(), "REDIRECT ")
+			return "REDIRECT", fmt.Errorf("redirected to new leader at %s", client.leaderID)
 		}
-		return fmt.Errorf("operation submission failed: %v", resp.GetMessage())
+		return "", fmt.Errorf("operation submission failed: %v", resp.GetMessage())
 	}
 
 	log.Printf("Operation successfully submitted and committed: %s", resp.GetMessage())
-	return nil
+	return resp.GetMessage(), nil
 }
