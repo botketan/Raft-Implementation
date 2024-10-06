@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"context"
@@ -38,7 +38,7 @@ func (client *RaftClient) SubmitOperation(op []byte) error {
 	for {
 		// If the leader is known, try submitting to the leader
 		if client.leaderAddress != "" {
-			err = client.submitToLeader(client.leaderAddress, op)
+			err = client.submit(client.leaderAddress, op)
 			if err == nil {
 				return nil
 			}
@@ -47,7 +47,7 @@ func (client *RaftClient) SubmitOperation(op []byte) error {
 
 		// If leader is unknown or submission to leader failed, try all nodes
 		for _, node := range client.raftNodes {
-			err = client.submitToLeader(node, op)
+			err = client.submit(node, op)
 			if err == nil {
 				return nil
 			}
@@ -61,8 +61,8 @@ func (client *RaftClient) SubmitOperation(op []byte) error {
 	}
 }
 
-// submitToLeader tries to submit the operation to the current leader node.
-func (client *RaftClient) submitToLeader(leaderAddress string, op []byte) error {
+// submit tries to submit the operation to the current leader node.
+func (client *RaftClient) submit(leaderAddress string, op []byte) error {
 	conn, err := grpc.NewClient(leaderAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return fmt.Errorf("failed to connect to leader: %v", err)
