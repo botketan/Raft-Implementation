@@ -392,7 +392,7 @@ func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *
 	}
 
 	resp.Success = true
-	resp.Message = "Operation submitted successfully"
+	resp.Message = operationResult.Success().String()
 
 	return nil
 }
