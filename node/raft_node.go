@@ -389,6 +389,7 @@ func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *
 	operationResult := operationFuture.Await()
 	if operationResult.Error() != nil {
 		resp.Success = false
+		resp.Message = operationResult.Error().Error()
 		return nil
 	}
 
@@ -827,6 +828,7 @@ func (r *RaftNode) Start() error {
 
 	r.node.registerRequestVoteHandler(r.RequestVoteHandler)
 	r.node.registerAppendEntriesHandler(r.AppendEntriesHandler)
+	r.node.registerSubmitOperationHandler(r.SubmitOperationHandler)
 
 	// Initalise the followers list
 	for id := range r.config.Members {
