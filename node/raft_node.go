@@ -369,8 +369,6 @@ func (r *RaftNode) applyEntries() {
 
 // Submit operation RPC handler
 func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *pb.SubmitOperationResponse) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	if r.state != Leader {
 		resp.Success = false
