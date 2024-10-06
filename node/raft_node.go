@@ -781,6 +781,11 @@ func (r *RaftNode) becomeCandidate() {
 	r.currentTerm++
 	r.votedFor = r.id
 	r.saveStateToDB()
+
+	// Notify that leadership is lost to the client
+	r.operationManager.notifyLostLeaderShip()
+	r.operationManager = newOperationManager()
+
 	r.logger.Log("transitioned to candidate state with currentTerm: %d", r.currentTerm)
 }
 
@@ -790,6 +795,11 @@ func (r *RaftNode) becomeFollower(leaderID string, term int64) {
 	r.votedFor = ""
 	r.currentTerm = term
 	r.saveStateToDB()
+
+	// Notify that leadership is lost to the client
+	r.operationManager.notifyLostLeaderShip()
+	r.operationManager = newOperationManager()
+
 	r.logger.Log("transitioned to follower state with currentTerm: %d", r.currentTerm)
 }
 

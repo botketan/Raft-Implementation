@@ -58,6 +58,14 @@ func newOperationManager() *operationManager {
 	}
 }
 
+// This is used to tell clients of lost leadership
+func (r *operationManager) notifyLostLeaderShip() {
+	for _, responseCh := range r.pendingReplicated {
+		responseCh <- &result[OperationResponse]{err: fmt.Errorf("not a leader")}
+	}
+	r.pendingReplicated = make(map[int64]chan Result[OperationResponse])
+}
+
 type result[T OperationResponse] struct {
 	// The actual result of an operation.
 	success T
