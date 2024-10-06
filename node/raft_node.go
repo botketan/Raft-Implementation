@@ -369,8 +369,6 @@ func (r *RaftNode) applyEntries() {
 
 // Submit operation RPC handler
 func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *pb.SubmitOperationResponse) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	if r.state != Leader {
 		resp.Success = false
@@ -389,6 +387,7 @@ func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *
 	operationResult := operationFuture.Await()
 	if operationResult.Error() != nil {
 		resp.Success = false
+		resp.Message = operationResult.Error().Error()
 		return nil
 	}
 
@@ -782,6 +781,11 @@ func (r *RaftNode) becomeCandidate() {
 	r.currentTerm++
 	r.votedFor = r.id
 	r.saveStateToDB()
+
+	// Notify that leadership is lost to the client
+	r.operationManager.notifyLostLeaderShip()
+	r.operationManager = newOperationManager()
+
 	r.logger.Log("transitioned to candidate state with currentTerm: %d", r.currentTerm)
 }
 
@@ -791,6 +795,11 @@ func (r *RaftNode) becomeFollower(leaderID string, term int64) {
 	r.votedFor = ""
 	r.currentTerm = term
 	r.saveStateToDB()
+
+	// Notify that leadership is lost to the client
+	r.operationManager.notifyLostLeaderShip()
+	r.operationManager = newOperationManager()
+
 	r.logger.Log("transitioned to follower state with currentTerm: %d", r.currentTerm)
 }
 
@@ -827,6 +836,7 @@ func (r *RaftNode) Start() error {
 
 	r.node.registerRequestVoteHandler(r.RequestVoteHandler)
 	r.node.registerAppendEntriesHandler(r.AppendEntriesHandler)
+	r.node.registerSubmitOperationHandler(r.SubmitOperationHandler)
 
 	// Initalise the followers list
 	for id := range r.config.Members {
