@@ -22,6 +22,7 @@ const (
 	Follower State = iota
 	Candidate
 	Leader
+	Client
 	Dead // The node is shutdown
 )
 
@@ -38,6 +39,8 @@ func (s State) String() string {
 		return "Candidate"
 	case Leader:
 		return "Leader"
+	case Client:
+		return "Client"
 	case Dead:
 		return "Dead"
 	default:

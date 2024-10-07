@@ -3,11 +3,10 @@ package client
 import (
 	"context"
 	"fmt"
-	"log"
+	lgr "raft/node"
+	pb "raft/protos" // Protobuf definitions for Raft
 	"strings"
 	"time"
-
-	pb "raft/protos" // Protobuf definitions for Raft
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,7 +18,8 @@ type RaftClient struct {
 	seqNo       int64                    // Sequence number for operations
 	leaderID    string                   // Current known leader ID
 	raftNodes   map[string]string        // Map of all known Raft node addresses
-	clientsList map[string]pb.RaftClient // Map of client connections to Raft nodes
+	clientsList map[string]pb.RaftClient // Map of client connections to Raft node
+	logger      lgr.Logger
 }
 
 // NewRaftClient creates a new RaftClient with a unique clientID and list of node addresses.
@@ -33,12 +33,15 @@ func NewRaftClient(clientID string, nodes map[string]string) (*RaftClient, error
 
 		clients[id] = pb.NewRaftClient(conn)
 	}
+	var clientState = lgr.Client
+	logger, _ := lgr.NewLogger(clientID, &clientState)
 	return &RaftClient{
 		clientID:    clientID,
 		seqNo:       1, // Initialize sequence number to 1
 		raftNodes:   nodes,
 		leaderID:    "", // Initially, the leader is unknown
 		clientsList: clients,
+		logger:      logger,
 	}, nil
 }
 
@@ -57,27 +60,27 @@ func (client *RaftClient) SubmitOperation(op []byte, timeout time.Duration) (str
 		if client.leaderID != "" {
 			response, err = client.submit(client.leaderID, op)
 			if response == "REDIRECT" {
-				log.Printf("Redirected to new leader at %s", client.leaderID)
+				client.logger.Log("Redirected to new leader at %s", client.leaderID)
 				continue
 			}
 			if err == nil {
 				return response, nil
 			}
 			client.leaderID = "" // Reset leader if submission to leader failed
-			log.Printf("Failed to submit to leader at %s: %v", client.leaderID, err)
+			client.logger.Log("Failed to submit to leader at %s: %v", client.leaderID, err)
 		}
 
 		// If leader is unknown or submission to leader failed, try all nodes
 		for node := range client.raftNodes {
 			response, err = client.submit(node, op)
-			log.Printf("Got response: %v, err: %v from Server ID: %v\n\n", response, err, node)
+			client.logger.Log("Got response: %v, err: %v from Server ID: %v\n\n", response, err, node)
 			if err == nil {
 				return response, nil
 			}
 
 			// If the node redirected us to a new leader, retry with the new leader
 			if client.leaderID != "" {
-				log.Printf("Client Discovered new leader at %s", client.leaderID)
+				client.logger.Log("Client Discovered new leader at %s", client.leaderID)
 				break
 			}
 		}
@@ -98,7 +101,7 @@ func (client *RaftClient) submit(leaderID string, op []byte) (string, error) {
 		Operation: op,
 	}
 
-	log.Printf("Sending Operation {%v} to Server ID: %v\n\n", req, leaderID)
+	client.logger.Log("Sending Operation {%v} to Server ID: %v\n\n", req, leaderID)
 
 	resp, err := raftClient.SubmitOperation(ctx, req)
 	if err != nil {
@@ -119,30 +122,30 @@ func (client *RaftClient) submit(leaderID string, op []byte) (string, error) {
 
 func SimulateClientCommands(client *RaftClient) {
 	<-time.After(time.Second * 2)
-	log.Printf("Submitting operations...")
+	client.logger.Log("Submitting operations...")
 	resp, err := client.SubmitOperation([]byte("GET X"), 2*time.Minute)
 	if err != nil {
-		fmt.Printf("Error for GET X : %v\n\n", err)
+		client.logger.Log("Error for GET X : %v\n\n", err)
 	} else {
-		fmt.Printf("Response for GET X : %v\n\n", resp)
+		client.logger.Log("Response for GET X : %v\n\n", resp)
 	}
 	resp, err = client.SubmitOperation([]byte("SET X 5"), 2*time.Minute)
 	if err != nil {
-		fmt.Printf("Error for SET X: %v\n\n", err)
+		client.logger.Log("Error for SET X: %v\n\n", err)
 	} else {
-		fmt.Printf("Response for SET X: %v\n\n", resp)
+		client.logger.Log("Response for SET X: %v\n\n", resp)
 	}
 	<-time.After(time.Second * 1)
 	resp, err = client.SubmitOperation([]byte("GET X"), 2*time.Minute)
 	if err != nil {
-		fmt.Printf("Error for GET X: %v\n\n", err)
+		client.logger.Log("Error for GET X: %v\n\n", err)
 	} else {
-		fmt.Printf("Response for GET X: %v\n\n", resp)
+		client.logger.Log("Response for GET X: %v\n\n", resp)
 	}
 	resp, err = client.SubmitOperation([]byte("GET X"), 2*time.Minute)
 	if err != nil {
-		fmt.Printf("Error for GET X: %v\n\n", err)
+		client.logger.Log("Error for GET X: %v\n\n", err)
 	} else {
-		fmt.Printf("Response for GET X: %v\n\n", resp)
+		client.logger.Log("Response for GET X: %v\n\n", resp)
 	}
 }
