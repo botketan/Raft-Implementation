@@ -111,6 +111,7 @@ type RaftNode struct {
 	commitIndex      int64
 	lastApplied      int64
 	leaderId         string
+	commitedConfig   *Configuration
 	state            State
 	lastContact      time.Time                 // To store the last time some leader has contacted - used for handling timeouts
 	followersList    map[string]*followerState // To map id to other follower state
