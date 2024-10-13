@@ -65,16 +65,35 @@ type Configuration struct {
 	Members map[string]string
 }
 
+type LogEntryType int32
+
+const (
+	NORMAL_OP LogEntryType = 0
+	CONFIG_OP LogEntryType = 1
+)
+
+func (s LogEntryType) String() string {
+	switch s {
+	case NORMAL_OP:
+		return "NORMAL_OP"
+	case CONFIG_OP:
+		return "CONFIG_OP"
+	default:
+		panic("Invalid Operation")
+	}
+}
+
 type LogEntry struct {
-	Index    int64
-	Term     int64
-	Data     []byte
-	seqNo    int64
-	clientID string
+	Index     int64
+	Term      int64
+	Data      []byte
+	seqNo     int64
+	clientID  string
+	entryType LogEntryType
 }
 
 func (e LogEntry) String() string {
-	return fmt.Sprintf("Index: %d, Term: %d, Data: %s, SeqNo: %d, clientID: %s", e.Index, e.Term, string(e.Data), e.seqNo, e.clientID)
+	return fmt.Sprintf("Index: %d, Term: %d, Data: %s, SeqNo: %d, clientID: %s, operationType: %s", e.Index, e.Term, string(e.Data), e.seqNo, e.clientID, e.entryType)
 }
 
 type Log struct {
@@ -192,13 +211,16 @@ func (r *RaftNode) restoreStates() error {
 	r.log.entries = []LogEntry{}
 	for _, entry := range NodeLog.LogEntries {
 		r.log.entries = append(r.log.entries, LogEntry{
-			Index:    entry.Index,
-			Term:     entry.Term,
-			Data:     entry.Data,
-			seqNo:    int64(entry.SeqNo),
-			clientID: entry.ClientID,
+			Index:     entry.Index,
+			Term:      entry.Term,
+			Data:      entry.Data,
+			seqNo:     int64(entry.SeqNo),
+			clientID:  entry.ClientID,
+			entryType: LogEntryType(entry.EntryType),
 		})
 	}
+
+	// TODO: Read from the log and restore the latest configuration
 
 	r.logger.Log("state restored, currentTerm = %d, votedFor = %s, log = %v", r.currentTerm, r.votedFor, r.log.entries)
 	return nil
@@ -422,16 +444,17 @@ func (r *RaftNode) SubmitOperation(clientReq *fsm.ClientOperationRequest, timeou
 	}
 
 	entry := LogEntry{
-		Index:    int64(len(r.log.entries)),
-		Term:     r.currentTerm,
-		Data:     operationBytes,
-		seqNo:    clientReq.SeqNo,
-		clientID: clientReq.ClientID,
+		Index:     int64(len(r.log.entries)),
+		Term:      r.currentTerm,
+		Data:      operationBytes,
+		seqNo:     clientReq.SeqNo,
+		clientID:  clientReq.ClientID,
+		entryType: NORMAL_OP,
 	}
 
 	r.log.entries = append(r.log.entries, entry)
 
-	mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.seqNo, entry.clientID)
+	mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.seqNo, entry.clientID, mongodb.LogEntryType(entry.entryType))
 
 	r.operationManager.pendingReplicated[entry.Index] = operationFuture.responseCh
 
@@ -750,25 +773,27 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 		// If there is already an entry at this index, replace it (log overwrite protection)
 		if entry.Index < int64(len(r.log.entries)) {
 			r.log.entries[entry.Index] = LogEntry{
-				Index:    entry.Index,
-				Term:     entry.Term,
-				Data:     entry.Data,
-				seqNo:    entry.SeqNo,
-				clientID: entry.ClientID,
+				Index:     entry.Index,
+				Term:      entry.Term,
+				Data:      entry.Data,
+				seqNo:     entry.SeqNo,
+				clientID:  entry.ClientID,
+				entryType: LogEntryType(entry.EntryType),
 			}
-			mongodb.ChangeLog(*r.mongoClient, r.id, entry.Index, entry.Term, entry.Index, entry.Data, entry.SeqNo, entry.ClientID)
+			mongodb.ChangeLog(*r.mongoClient, r.id, entry.Index, entry.Term, entry.Index, entry.Data, entry.SeqNo, entry.ClientID, mongodb.LogEntryType(entry.EntryType))
 
 		} else {
 			// Append new log entries
 			r.log.entries = append(r.log.entries, LogEntry{
-				Index:    entry.Index,
-				Term:     entry.Term,
-				Data:     entry.Data,
-				seqNo:    entry.SeqNo,
-				clientID: entry.ClientID,
+				Index:     entry.Index,
+				Term:      entry.Term,
+				Data:      entry.Data,
+				seqNo:     entry.SeqNo,
+				clientID:  entry.ClientID,
+				entryType: LogEntryType(entry.EntryType),
 			})
 
-			mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.SeqNo, entry.ClientID)
+			mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.SeqNo, entry.ClientID, mongodb.LogEntryType(entry.EntryType))
 		}
 	}
 
@@ -884,11 +909,12 @@ func convertToProtoEntries(entries []LogEntry) []*pb.LogEntry {
 	var protoEntries []*pb.LogEntry
 	for _, entry := range entries {
 		protoEntries = append(protoEntries, &pb.LogEntry{
-			Index:    entry.Index,
-			Term:     entry.Term,
-			Data:     entry.Data,
-			SeqNo:    entry.seqNo,
-			ClientID: entry.clientID,
+			Index:     entry.Index,
+			Term:      entry.Term,
+			Data:      entry.Data,
+			SeqNo:     entry.seqNo,
+			ClientID:  entry.clientID,
+			EntryType: pb.LogEntry_LogEntryType(entry.entryType),
 		})
 	}
 	return protoEntries

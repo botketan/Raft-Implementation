@@ -8,6 +8,11 @@ message LogEntry {
     bytes  data   = 3;
     int64 seqNo = 4;
     string clientID = 5;
+    enum LogEntryType {
+        NORMAL_OP = 0;
+        CONFIG_OP    = 1;
+    }
+    LogEntryType entry_type = 6;
 }
 
 message AppendEntriesRequest {

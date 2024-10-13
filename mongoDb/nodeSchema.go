@@ -33,4 +33,14 @@ type LogEntry struct {
 
 	// The ID of the client that submitted the request
 	ClientID string `bson:"client_id,omitempty"`
+
+	// Entry type of log to differentiate between normal and config ops
+	EntryType LogEntryType `bson:"entry_type,omitempty"`
 }
+
+type LogEntryType int32
+
+const (
+	NORMAL_OP LogEntryType = 0
+	CONFIG    LogEntryType = 1
+)
