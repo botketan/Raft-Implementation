@@ -60,8 +60,30 @@ message SubmitOperationResponse {
     string message = 2;
 }
 
+message AddServerRequest {
+    string node_id = 1;
+    string address = 2;
+}
+
+message AddServerResponse {
+    string status = 1;
+    string leader_hint = 2;
+}
+
+message RemoveServerRequest {
+    string node_id = 1;
+    string address = 2;
+}
+
+message RemoveServerResponse {
+    string status = 1;
+    string leader_hint = 2;
+}
+
 service Raft {
     rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse) {}
     rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse) {}
     rpc SubmitOperation(SubmitOperationRequest) returns (SubmitOperationResponse) {}
+    rpc AddServer(AddServerRequest) returns (AddServerResponse) {}
+    rpc RemoveServer(RemoveServerRequest) returns (RemoveServerResponse) {}
 }

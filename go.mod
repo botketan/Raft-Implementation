@@ -5,7 +5,7 @@ go 1.23.1
 require (
 	go.mongodb.org/mongo-driver v1.17.0
 	google.golang.org/grpc v1.67.0
-	google.golang.org/protobuf v1.34.2
+	google.golang.org/protobuf v1.35.1
 )
 
 require (
