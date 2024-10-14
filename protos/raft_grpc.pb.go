@@ -22,6 +22,8 @@ const (
 	Raft_AppendEntries_FullMethodName   = "/Raft/AppendEntries"
 	Raft_RequestVote_FullMethodName     = "/Raft/RequestVote"
 	Raft_SubmitOperation_FullMethodName = "/Raft/SubmitOperation"
+	Raft_AddServer_FullMethodName       = "/Raft/AddServer"
+	Raft_RemoveServer_FullMethodName    = "/Raft/RemoveServer"
 )
 
 // RaftClient is the client API for Raft service.
@@ -31,6 +33,8 @@ type RaftClient interface {
 	AppendEntries(ctx context.Context, in *AppendEntriesRequest, opts ...grpc.CallOption) (*AppendEntriesResponse, error)
 	RequestVote(ctx context.Context, in *RequestVoteRequest, opts ...grpc.CallOption) (*RequestVoteResponse, error)
 	SubmitOperation(ctx context.Context, in *SubmitOperationRequest, opts ...grpc.CallOption) (*SubmitOperationResponse, error)
+	AddServer(ctx context.Context, in *AddServerRequest, opts ...grpc.CallOption) (*AddServerResponse, error)
+	RemoveServer(ctx context.Context, in *RemoveServerRequest, opts ...grpc.CallOption) (*RemoveServerResponse, error)
 }
 
 type raftClient struct {
@@ -68,6 +72,24 @@ func (c *raftClient) SubmitOperation(ctx context.Context, in *SubmitOperationReq
 	return out, nil
 }
 
+func (c *raftClient) AddServer(ctx context.Context, in *AddServerRequest, opts ...grpc.CallOption) (*AddServerResponse, error) {
+	out := new(AddServerResponse)
+	err := c.cc.Invoke(ctx, Raft_AddServer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftClient) RemoveServer(ctx context.Context, in *RemoveServerRequest, opts ...grpc.CallOption) (*RemoveServerResponse, error) {
+	out := new(RemoveServerResponse)
+	err := c.cc.Invoke(ctx, Raft_RemoveServer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftServer is the server API for Raft service.
 // All implementations must embed UnimplementedRaftServer
 // for forward compatibility
@@ -75,6 +97,8 @@ type RaftServer interface {
 	AppendEntries(context.Context, *AppendEntriesRequest) (*AppendEntriesResponse, error)
 	RequestVote(context.Context, *RequestVoteRequest) (*RequestVoteResponse, error)
 	SubmitOperation(context.Context, *SubmitOperationRequest) (*SubmitOperationResponse, error)
+	AddServer(context.Context, *AddServerRequest) (*AddServerResponse, error)
+	RemoveServer(context.Context, *RemoveServerRequest) (*RemoveServerResponse, error)
 	mustEmbedUnimplementedRaftServer()
 }
 
@@ -90,6 +114,12 @@ func (UnimplementedRaftServer) RequestVote(context.Context, *RequestVoteRequest)
 }
 func (UnimplementedRaftServer) SubmitOperation(context.Context, *SubmitOperationRequest) (*SubmitOperationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubmitOperation not implemented")
+}
+func (UnimplementedRaftServer) AddServer(context.Context, *AddServerRequest) (*AddServerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddServer not implemented")
+}
+func (UnimplementedRaftServer) RemoveServer(context.Context, *RemoveServerRequest) (*RemoveServerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveServer not implemented")
 }
 func (UnimplementedRaftServer) mustEmbedUnimplementedRaftServer() {}
 
@@ -158,6 +188,42 @@ func _Raft_SubmitOperation_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Raft_AddServer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddServerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftServer).AddServer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Raft_AddServer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftServer).AddServer(ctx, req.(*AddServerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Raft_RemoveServer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveServerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftServer).RemoveServer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Raft_RemoveServer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftServer).RemoveServer(ctx, req.(*RemoveServerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Raft_ServiceDesc is the grpc.ServiceDesc for Raft service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -176,6 +242,14 @@ var Raft_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SubmitOperation",
 			Handler:    _Raft_SubmitOperation_Handler,
+		},
+		{
+			MethodName: "AddServer",
+			Handler:    _Raft_AddServer_Handler,
+		},
+		{
+			MethodName: "RemoveServer",
+			Handler:    _Raft_RemoveServer_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
