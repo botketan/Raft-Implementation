@@ -81,6 +81,8 @@ type Node struct {
 	appendEntriesHandler func(*pb.AppendEntriesRequest, *pb.AppendEntriesResponse) error
 	requestVoteHandler   func(*pb.RequestVoteRequest, *pb.RequestVoteResponse) error
 	submitOperationHandler func(*pb.SubmitOperationRequest, *pb.SubmitOperationResponse) error
+	addServerHandler func(*pb.AddServerRequest, *pb.AddServerResponse) error
+	removeServerHandler func(*pb.RemoveServerRequest, *pb.RemoveServerResponse) error
 }
 
 func InitNode(addr string) (*Node, error) {
@@ -111,6 +113,18 @@ func (n *Node) registerSubmitOperationHandler(
 	handler func(*pb.SubmitOperationRequest, *pb.SubmitOperationResponse) error,
 ) {
 	n.submitOperationHandler = handler
+}
+
+func (n *Node) registerAddServerHandler(
+	handler func(*pb.AddServerRequest, *pb.AddServerResponse) error,
+) {
+	n.addServerHandler = handler
+}
+
+func (n *Node) registerRemoveServerHandler(
+	handler func(*pb.RemoveServerRequest, *pb.RemoveServerResponse) error,
+) {
+	n.removeServerHandler = handler
 }
 
 // Wrapper functions to send RPCs
@@ -179,6 +193,24 @@ func (n *Node) SubmitOperation(ctx context.Context, req *pb.SubmitOperationReque
 	err := n.submitOperationHandler(req, resp)
 	if err != nil {
 		return &pb.SubmitOperationResponse{}, status.Error(codes.Unavailable, err.Error())
+	}
+	return resp, nil
+}
+
+func (n *Node) AddServer(ctx context.Context, req *pb.AddServerRequest) (*pb.AddServerResponse, error) {
+	resp := &pb.AddServerResponse{}
+	err := n.addServerHandler(req, resp)
+	if err != nil {
+		return &pb.AddServerResponse{}, status.Error(codes.Unavailable, err.Error())
+	}
+	return resp, nil
+}
+
+func (n *Node) RemoveServer(ctx context.Context, req *pb.RemoveServerRequest) (*pb.RemoveServerResponse, error) {
+	resp := &pb.RemoveServerResponse{}
+	err := n.removeServerHandler(req, resp)
+	if err != nil {
+		return &pb.RemoveServerResponse{}, status.Error(codes.Unavailable, err.Error())
 	}
 	return resp, nil
 }
