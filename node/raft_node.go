@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/mongo"
+	"google.golang.org/protobuf/proto"
 )
 
 /*
@@ -58,11 +59,6 @@ type followerState struct {
 type RaftInterface interface {
 	// Restore the state incase of waking up from failure
 	restoreStates() error
-}
-
-type Configuration struct {
-	// Node ID -> address map
-	Members map[string]string
 }
 
 type LogEntryType int32
@@ -124,13 +120,13 @@ type RaftNode struct {
 	currentTerm int64 // Default value is 0
 	address     string
 	votedFor    string // Default value is ""
-	config      *Configuration
 
 	// Volatile states
 	commitIndex      int64
 	lastApplied      int64
 	leaderId         string
-	commitedConfig   *Configuration
+	config           *pb.Configuration
+	commitedConfig   *pb.Configuration
 	state            State
 	lastContact      time.Time                 // To store the last time some leader has contacted - used for handling timeouts
 	followersList    map[string]*followerState // To map id to other follower state
@@ -147,7 +143,7 @@ type RaftNode struct {
 	logger Logger
 }
 
-func InitRaftNode(ID string, address string, config *Configuration, fsm fsm.FSM) (*RaftNode, error) {
+func InitRaftNode(ID string, address string, config *pb.Configuration, fsm fsm.FSM) (*RaftNode, error) {
 	node, err := InitNode(address)
 	if err != nil {
 		return nil, err
@@ -205,8 +201,6 @@ func (r *RaftNode) restoreStates() error {
 	r.currentTerm = NodeLog.CurrentTerm
 	r.address = NodeLog.Address
 	r.votedFor = NodeLog.VotedFor
-	// TODO: Uncomment this once config commit is done
-	//r.config.Members = NodeLog.Config.Members
 
 	r.log.entries = []LogEntry{}
 	for _, entry := range NodeLog.LogEntries {
@@ -220,7 +214,31 @@ func (r *RaftNode) restoreStates() error {
 		})
 	}
 
-	// TODO: Read from the log and restore the latest configuration
+	// A second config entry is processed only after first one gets committed, so
+	// if there is only one config entry in log, it maynot have been committed
+	// If there were 2 or more config entries, last one is current config and penultimate one is committed config
+	var penultimateConfig = &pb.Configuration{}
+	var lastConfig = &pb.Configuration{}
+	for _, entry := range r.log.entries {
+		if entry.entryType == CONFIG_OP {
+			penultimateConfig = lastConfig
+			err := proto.Unmarshal(entry.Data, lastConfig)
+			if err != nil {
+				r.logger.Log("Error while un-marshalling: %v", err.Error())
+				continue
+			}
+		}
+	}
+
+	if !proto.Equal(lastConfig, &pb.Configuration{}) {
+		r.logger.Log("Last configuration restored from log: %v", lastConfig)
+		r.config = lastConfig
+	}
+
+	if !proto.Equal(penultimateConfig, &pb.Configuration{}) {
+		r.logger.Log("Last committed configuration restored from log: %v", penultimateConfig)
+		r.commitedConfig = penultimateConfig
+	}
 
 	r.logger.Log("state restored, currentTerm = %d, votedFor = %s, log = %v", r.currentTerm, r.votedFor, r.log.entries)
 	return nil

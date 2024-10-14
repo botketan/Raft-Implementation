@@ -7,18 +7,26 @@ import (
 	"raft/client"
 	"raft/fsm"
 	r "raft/node"
+	pb "raft/protos"
 	"syscall"
 )
 
 func main() {
 
-	config := &r.Configuration{
+	config := &pb.Configuration{
 		Members: map[string]string{
 			"1": "localhost:8000",
 			"2": "localhost:8005",
 			"3": "localhost:8021",
 		},
+		IsVoter: map[string]bool{
+			"1": true,
+			"2": true,
+			"3": true,
+		},
+		LogIndex: -1,
 	}
+	fmt.Println(config)
 	raft1, err := r.InitRaftNode("1", "localhost:8000", config, fsm.NewFSMManager())
 	if err != nil {
 		panic(err)

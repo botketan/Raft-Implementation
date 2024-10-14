@@ -11,12 +11,18 @@ import (
 )
 
 func setupRaftNode() *node.RaftNode {
-	config := &node.Configuration{
+	config := &pb.Configuration{
 		Members: map[string]string{
 			"node1": "localhost:5001",
 			"node2": "localhost:5002",
 			"node3": "localhost:5003",
 		},
+		IsVoter: map[string]bool{
+			"node1": true,
+			"node2": true,
+			"node3": true,
+		},
+		LogIndex: -1,
 	}
 	raftNode, err := node.InitRaftNode("node1", "localhost:5001", config, fsm.NewFSMManager())
 	if err != nil {
