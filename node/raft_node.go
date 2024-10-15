@@ -21,6 +21,7 @@ type State int
 
 const (
 	Follower State = iota
+	PreCandidate
 	Candidate
 	Leader
 	Client
@@ -675,22 +676,31 @@ func (r *RaftNode) startElection() {
 		return
 	}
 
-	if r.state == Follower || r.state == Candidate {
+	if r.state == Follower {
 		r.logger.Log("election timeout")
+		r.becomePreCandidate()
+	}
+
+	if r.state == Candidate {
+		r.logger.Log("election timeout, starting new election")
 		r.becomeCandidate()
 	}
 
+	prevote := false
+	if r.state == PreCandidate {
+		prevote = true
+	}
 	votesReceived := 1
 	for id, addr := range r.config.Members {
 		if id != r.id {
-			go r.sendRequestVote(id, addr, &votesReceived)
+			go r.sendRequestVote(id, addr, &votesReceived, prevote)
 		}
 	}
 
 }
 
 // Send the Request Vote RPC to an node (id, address) and process it
-func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
+func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int, prevote bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -707,6 +717,12 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
 		Term:         int64(r.currentTerm),
 		LastLogIndex: lastLogIndex,
 		LastLogTerm:  lastLogTerm,
+		Prevote:      prevote,
+	}
+
+	//Using Expected Term in voting if prevote
+	if prevote {
+		req.Term++
 	}
 
 	r.logger.Log("sent RequestVote RPC to Node %s with Term: %d, LastLogIndex: %d, LastLogterm: %d", id, req.GetTerm(), req.GetLastLogIndex(), req.GetLastLogTerm())
@@ -734,8 +750,15 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int) {
 		return
 	}
 
+	if r.hasMajority(*votesRcd) && r.state == PreCandidate {
+		// Signal to the election loop to start an election so that the real election
+		// does not have to wait until the election ticker goes off again.
+		r.state = Candidate
+		r.electionCond.Broadcast()
+	}
+
 	r.logger.Log("received Votes: %d", *votesRcd)
-	if r.state == Candidate && r.hasMajority(*votesRcd) {
+	if !prevote && r.state == Candidate && r.hasMajority(*votesRcd) {
 		r.becomeLeader()
 	}
 }
@@ -789,10 +812,13 @@ func (r *RaftNode) RequestVoteHandler(req *pb.RequestVoteRequest, resp *pb.Reque
 
 	// Grant vote
 	resp.VoteGranted = true
-	r.lastContact = time.Now()
-	r.votedFor = req.GetCandidateId()
 
-	r.saveStateToDB()
+	// Check if real election
+	if !req.GetPrevote() {
+		r.lastContact = time.Now()
+		r.votedFor = req.GetCandidateId()
+		r.saveStateToDB()
+	}
 
 	r.logger.Log(
 		"requestVote RPC successful: votedFor = %s, CurrentTerm = %d",
@@ -1002,6 +1028,13 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 	resp.Term = r.currentTerm
 	resp.Success = true
 	return nil
+}
+
+func (r *RaftNode) becomePreCandidate() {
+	r.state = PreCandidate
+	r.saveStateToDB()
+
+	r.logger.Log("transitioned to pre-candidate state with currentTerm: %d", r.currentTerm)
 }
 
 func (r *RaftNode) becomeCandidate() {
