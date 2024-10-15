@@ -20,17 +20,6 @@ func (o Operation) String() string {
 	)
 }
 
-type Result[T OperationResponse] interface {
-	// Success returns the response associated with an operation.
-	// Error should always be called before Success - the result
-	// returned by Success is only valid if Error returns nil.
-	Success() T
-
-	// Error returns any error that occurred during the
-	// operation that was to produce the response.
-	Error() error
-}
-
 type OperationResponse struct {
 	// The operation applied to the state machine.
 	Operation Operation
@@ -64,20 +53,4 @@ func (r *operationManager) notifyLostLeaderShip() {
 		responseCh <- &result[OperationResponse]{err: fmt.Errorf("not a leader")}
 	}
 	r.pendingReplicated = make(map[int64]chan Result[OperationResponse])
-}
-
-type result[T OperationResponse] struct {
-	// The actual result of an operation.
-	success T
-
-	// Any error that occurred during the processing of the result.
-	err error
-}
-
-func (r *result[T]) Success() T {
-	return r.success
-}
-
-func (r *result[T]) Error() error {
-	return r.err
 }
