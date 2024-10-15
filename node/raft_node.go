@@ -161,10 +161,10 @@ func InitRaftNode(ID string, address string, config *pb.Configuration, fsm fsm.F
 		lastApplied:      -1,
 		config:           config,
 		votedFor:         "",
-		log:              &Log{},				 // Initialize log to prevent nil pointer dereference
-		operationManager: newOperationManager(), 
-		configManager:    newConfigManager(),    
-		fsm:              fsm,                   // FSM to get the logs
+		log:              &Log{}, // Initialize log to prevent nil pointer dereference
+		operationManager: newOperationManager(),
+		configManager:    newConfigManager(),
+		fsm:              fsm, // FSM to get the logs
 	}
 
 	raft.applyCond = sync.NewCond(&raft.mu)
@@ -405,6 +405,7 @@ func (r *RaftNode) applyEntries() {
 
 			r.commitedConfig = configuration.toProto()
 			respond(r.configManager.pendingReplicated[entry.Index], protoToConfiguration(r.config), nil)
+
 		case NORMAL_OP:
 			responseCh := r.operationManager.pendingReplicated[entry.Index]
 			delete(r.operationManager.pendingReplicated, entry.Index)
@@ -433,9 +434,8 @@ func (r *RaftNode) applyEntries() {
 }
 
 // appendConfiguration sets the log index associated with the
-// configuration and appends it to the log.
+// configuration and appends it to the log. to be used inside a threadsafe function
 func (r *RaftNode) appendConfiguration(configuration *Configuration) {
-	configuration.Index = r.log.entries[len(r.log.entries)-1].Index + 1
 	data, err := encodeConfiguration(configuration)
 	if err != nil {
 		r.logger.Log("failed to encode configuration: error = %v", err)
@@ -446,6 +446,7 @@ func (r *RaftNode) appendConfiguration(configuration *Configuration) {
 	if error != nil {
 		r.logger.Log("failed to add configuration to log: error = %v", error)
 	}
+	configuration.Index = r.log.entries[len(r.log.entries)-1].Index + 1
 }
 
 // nextConfiguration transitions this node from its current configuration to
@@ -474,7 +475,7 @@ func (r *RaftNode) nextConfiguration(next *Configuration) {
 	// Create entry for added nodes.
 	for id := range next.Members {
 		if _, ok := r.config.Members[id]; !ok {
-			r.followersList[id] = new(followerState)
+			r.followersList[id] = &followerState{nextIndex: 0, matchIndex: -1}
 		}
 	}
 }
@@ -562,7 +563,7 @@ func (r *RaftNode) AddServer(
 	r.appendConfiguration(&newConfiguration)
 
 	r.config = newConfiguration.toProto()
-	r.followersList[id] = &followerState{nextIndex: 1}
+	r.followersList[id] = &followerState{nextIndex: 0, matchIndex: -1}
 
 	r.configManager.pendingReplicated[newConfiguration.Index] = configurationFuture.responseCh
 
