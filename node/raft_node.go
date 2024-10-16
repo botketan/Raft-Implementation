@@ -29,7 +29,7 @@ const (
 )
 
 const (
-	electionTimeout  = time.Duration(300 * time.Millisecond)
+	electionTimeout  = time.Duration(600 * time.Millisecond)
 	heartbeatTimeout = time.Duration(50 * time.Millisecond)
 )
 
@@ -37,6 +37,8 @@ func (s State) String() string {
 	switch s {
 	case Follower:
 		return "Follower"
+	case PreCandidate:
+		return "PreCandidate"
 	case Candidate:
 		return "Candidate"
 	case Leader:
@@ -729,9 +731,9 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int, prevot
 	r.mu.Unlock()
 	resp, err := r.node.SendRequestVoteRPC(addr, req)
 	r.mu.Lock()
-
-	// Send only when you are a candidate and alive
-	if err != nil || r.state == Dead || r.state != Candidate {
+	r.logger.Log("received RequestVote Response from Node %s with Term: %d, VoteGranted: %v", id, resp.GetTerm(), resp.GetVoteGranted())
+	// Send only when you are alive
+	if err != nil || r.state == Dead {
 		return
 	}
 
@@ -750,14 +752,15 @@ func (r *RaftNode) sendRequestVote(id string, addr string, votesRcd *int, prevot
 		return
 	}
 
+	r.logger.Log("received Votes: %d", *votesRcd)
 	if r.hasMajority(*votesRcd) && r.state == PreCandidate {
 		// Signal to the election loop to start an election so that the real election
 		// does not have to wait until the election ticker goes off again.
+		r.logger.Log("Recieved Majority Votes in PreVote, starting real election")
 		r.state = Candidate
 		r.electionCond.Broadcast()
 	}
 
-	r.logger.Log("received Votes: %d", *votesRcd)
 	if !prevote && r.state == Candidate && r.hasMajority(*votesRcd) {
 		r.becomeLeader()
 	}
@@ -790,13 +793,13 @@ func (r *RaftNode) RequestVoteHandler(req *pb.RequestVoteRequest, resp *pb.Reque
 	}
 
 	// become follower if my term is outdated
-	if req.GetTerm() > int64(r.currentTerm) {
+	if !req.GetPrevote() && req.GetTerm() > int64(r.currentTerm) {
 		r.becomeFollower(req.GetCandidateId(), int64(req.GetTerm()))
 		resp.Term = req.GetTerm()
 	}
 
 	// Reject if I have already voted to someone else
-	if r.votedFor != "" && r.votedFor != req.GetCandidateId() {
+	if !req.GetPrevote() && r.votedFor != "" && r.votedFor != req.GetCandidateId() {
 		r.logger.Log("rejecting RequestVote RPC: already voted for %s", r.votedFor)
 		return nil
 	}
