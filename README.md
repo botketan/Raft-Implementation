@@ -11,10 +11,10 @@ CS 542 : Topics in Distributed systems Course Term Project
 - Basic KV Client to submit operations
 - State persistence using MongoDB as stable storage
 - RPCs are implemented using `gRPC` framework
+- Prevote phase to aid in disruptive servers in case of partition.
 ### TODO
 - Extend this to a Database (`sqlite`) using Database client
-- Implement Joint Consensus for cluster configuration
-- Implement PreVote State for reducing the RPCs in case of partition
+- Add and Remove Server RPCs
 
 #### Note
 For compiling protos, 
