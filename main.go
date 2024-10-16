@@ -19,11 +19,6 @@ func main() {
 			"2": "localhost:8005",
 			"3": "localhost:8021",
 		},
-		IsVoter: map[string]bool{
-			"1": true,
-			"2": true,
-			"3": true,
-		},
 		LogIndex: -1,
 	}
 

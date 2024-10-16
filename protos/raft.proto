@@ -4,8 +4,7 @@ option go_package = "./protos";
 
 message Configuration {
     map<string, string> members = 1;
-    map<string, bool> is_voter = 2;
-    int64 log_index = 3;
+    int64 log_index = 2;
 }
 
 message LogEntry {

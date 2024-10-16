@@ -17,11 +17,6 @@ func setupRaftNode() *node.RaftNode {
 			"node2": "localhost:5002",
 			"node3": "localhost:5003",
 		},
-		IsVoter: map[string]bool{
-			"node1": true,
-			"node2": true,
-			"node3": true,
-		},
 		LogIndex: -1,
 	}
 	raftNode, err := node.InitRaftNode("node1", "localhost:5001", config, fsm.NewFSMManager("node1"))

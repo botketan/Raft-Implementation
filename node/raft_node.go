@@ -508,7 +508,7 @@ func (r *RaftNode) AddServerHandler(req *pb.AddServerRequest, resp *pb.AddServer
 		return nil
 	}
 
-	future := r.AddServer(req.GetNodeId(), req.GetAddress(), false, 500*time.Millisecond)
+	future := r.AddServer(req.GetNodeId(), req.GetAddress(), 500*time.Millisecond)
 	configuration := future.Await()
 
 	if configuration.Error() != nil {
@@ -531,7 +531,6 @@ func (r *RaftNode) RemoveServerHandler(req *pb.RemoveServerRequest, resp *pb.Rem
 func (r *RaftNode) AddServer(
 	id string,
 	address string,
-	isVoter bool,
 	timeout time.Duration,
 ) Future[Configuration] {
 	r.mu.Lock()
@@ -553,7 +552,7 @@ func (r *RaftNode) AddServer(
 	}
 
 	// The provided node is already a part of the cluster.
-	if r.isMember(id) && r.isVoter(id) == isVoter {
+	if r.isMember(id) {
 		respond(configurationFuture.responseCh, config, nil)
 		return configurationFuture
 	}
@@ -561,7 +560,6 @@ func (r *RaftNode) AddServer(
 	// Create the configuration that includes the new node as a non-voter.
 	newConfiguration := config.Clone()
 	newConfiguration.Members[id] = address
-	newConfiguration.IsVoter[id] = isVoter
 
 	// Add the configuration to the log.
 	r.appendConfiguration(&newConfiguration)
@@ -580,10 +578,9 @@ func (r *RaftNode) AddServer(
 	}
 
 	r.logger.Log(
-		"request to add node submitted: id = %s, address = %s, voter = %t, logIndex = %d",
+		"request to add node submitted: id = %s, address = %s, logIndex = %d",
 		id,
 		address,
-		isVoter,
 		newConfiguration.Index,
 	)
 
@@ -1256,12 +1253,6 @@ func (r *RaftNode) committedThisTerm() bool {
 // has not been committed and false otherwise.
 func (r *RaftNode) pendingConfigurationChange() bool {
 	return r.commitedConfig == nil || r.commitedConfig.LogIndex != r.config.LogIndex
-}
-
-// isVoter returns true if the node with the provided ID
-// is a voting member of the cluster and false otherwise.
-func (r *RaftNode) isVoter(id string) bool {
-	return r.config.IsVoter[id]
 }
 
 // isMember returns true if the node with the provided ID

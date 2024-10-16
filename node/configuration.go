@@ -14,14 +14,6 @@ type Configuration struct {
 	// All members of the cluster. Maps node ID to address.
 	Members map[string]string
 
-	// Maps node ID to a boolean that indicates whether the node
-	// is a voting member or not. Voting members are those that
-	// have their vote counted in elections and their match index
-	// considered when the leader is advancing the commit index.
-	// Non-voting members merely receive log entries. They are
-	// not considered for election or commitment purposes.
-	IsVoter map[string]bool
-
 	// The log index of the configuration.
 	Index int64
 }
@@ -33,10 +25,6 @@ func NewConfiguration(index int64, members map[string]string) *Configuration {
 	configuration := &Configuration{
 		Index:   index,
 		Members: members,
-		IsVoter: make(map[string]bool, len(members)),
-	}
-	for id := range members {
-		configuration.IsVoter[id] = true
 	}
 	return configuration
 }
@@ -45,12 +33,10 @@ func NewConfiguration(index int64, members map[string]string) *Configuration {
 func (c *Configuration) Clone() Configuration {
 	configuration := Configuration{
 		Index:   c.Index,
-		IsVoter: make(map[string]bool, len(c.Members)),
 		Members: make(map[string]string, len(c.Members)),
 	}
 
 	for id := range c.Members {
-		configuration.IsVoter[id] = c.IsVoter[id]
 		configuration.Members[id] = c.Members[id]
 	}
 
@@ -62,7 +48,6 @@ func protoToConfiguration(pbConfiguration *pb.Configuration) Configuration {
 	configuration := Configuration{
 		Index:   pbConfiguration.GetLogIndex(),
 		Members: pbConfiguration.GetMembers(),
-		IsVoter: pbConfiguration.GetIsVoter(),
 	}
 	return configuration
 }
@@ -70,9 +55,8 @@ func protoToConfiguration(pbConfiguration *pb.Configuration) Configuration {
 // toProto converts the configuration to a protobuf message.
 func (c *Configuration) toProto() *pb.Configuration {
 	return &pb.Configuration{
-		Members: c.Members,
-		IsVoter: c.IsVoter,
-		LogIndex:   c.Index,
+		Members:  c.Members,
+		LogIndex: c.Index,
 	}
 }
 
@@ -81,22 +65,13 @@ func (c *Configuration) String() string {
 	var builder strings.Builder
 
 	builder.WriteString(fmt.Sprintf("logIndex: %d members: ", c.Index))
-	for nodeID, address := range c.Members {
-		if c.IsVoter[nodeID] {
-			builder.WriteString(fmt.Sprintf("(%s, %s, voter),", nodeID, address))
-		} else {
-			builder.WriteString(fmt.Sprintf("(%s, %s, non-voter),", nodeID, address))
-		}
-	}
-
 	return fmt.Sprintf("{%s}", strings.TrimSuffix(builder.String(), ","))
 }
 
 func encodeConfiguration(configuration *Configuration) ([]byte, error) {
 	pbConfiguration := &pb.Configuration{
-		Members: configuration.Members,
-		IsVoter: configuration.IsVoter,
-		LogIndex:   configuration.Index,
+		Members:  configuration.Members,
+		LogIndex: configuration.Index,
 	}
 	data, err := proto.Marshal(pbConfiguration)
 	if err != nil {
@@ -112,7 +87,6 @@ func decodeConfiguration(data []byte) (Configuration, error) {
 	}
 	configuration := Configuration{
 		Members: pbConfiguration.GetMembers(),
-		IsVoter: pbConfiguration.GetIsVoter(),
 		Index:   pbConfiguration.GetLogIndex(),
 	}
 	return configuration, nil
