@@ -356,6 +356,18 @@ func (r *RaftNode) commitEntries() {
 		//If majority has been reached, commit the entry
 		if r.hasMajority(count) {
 			r.commitIndex = i
+			if r.log.entries[i].entryType == CONFIG_OP {
+				configuration, err := decodeConfiguration(r.log.entries[i].Data)
+				if err != nil {
+					r.logger.Log("Error while decoding configuration: %v", err.Error())
+					continue
+				}
+				// If the configuration is already committed, skip
+				if r.commitedConfig != nil && configuration.Index <= r.commitedConfig.LogIndex {
+					continue
+				}
+				r.commitedConfig = configuration.toProto()
+			}
 			r.logger.Log("CommitIndex updated to %d", i)
 			anyCommit = true
 		}
@@ -394,17 +406,9 @@ func (r *RaftNode) applyEntries() {
 
 		switch entry.entryType {
 		case CONFIG_OP:
-			configuration, err := decodeConfiguration(entry.Data)
-			if err != nil {
-				r.logger.Log("Error while decoding configuration: %v", err.Error())
-				continue
-			}
-			// If the configuration is already committed, skip
-			if r.commitedConfig != nil && configuration.Index <= r.commitedConfig.LogIndex {
-				return
-			}
-			r.commitedConfig = configuration.toProto()
-			respond(r.configManager.pendingReplicated[entry.Index], configuration, nil)
+			responseCh := r.configManager.pendingReplicated[entry.Index]
+			delete(r.configManager.pendingReplicated, entry.Index)
+			respond(responseCh, protoToConfiguration(r.config), nil)
 		case NORMAL_OP:
 			responseCh := r.operationManager.pendingReplicated[entry.Index]
 			delete(r.operationManager.pendingReplicated, entry.Index)
