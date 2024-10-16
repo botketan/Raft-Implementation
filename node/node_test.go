@@ -24,7 +24,7 @@ func setupRaftNode() *node.RaftNode {
 		},
 		LogIndex: -1,
 	}
-	raftNode, err := node.InitRaftNode("node1", "localhost:5001", config, fsm.NewFSMManager())
+	raftNode, err := node.InitRaftNode("node1", "localhost:5001", config, fsm.NewFSMManager("node1"))
 	if err != nil {
 		fmt.Println("Error initializing Raft node:", err)
 	}

@@ -26,16 +26,16 @@ func main() {
 		},
 		LogIndex: -1,
 	}
-	fmt.Println(config)
-	raft1, err := r.InitRaftNode("1", "localhost:8000", config, fsm.NewFSMManager())
+
+	raft1, err := r.InitRaftNode("1", "localhost:8000", config, fsm.NewFSMManager("1"))
 	if err != nil {
 		panic(err)
 	}
-	raft2, err := r.InitRaftNode("2", "localhost:8005", config, fsm.NewFSMManager())
+	raft2, err := r.InitRaftNode("2", "localhost:8005", config, fsm.NewFSMManager("2"))
 	if err != nil {
 		panic(err)
 	}
-	raft3, err := r.InitRaftNode("3", "localhost:8021", config, fsm.NewFSMManager())
+	raft3, err := r.InitRaftNode("3", "localhost:8021", config, fsm.NewFSMManager("3"))
 	if err != nil {
 		panic(err)
 	}

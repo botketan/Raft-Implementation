@@ -48,13 +48,17 @@ type FSMManager struct {
 	// Client ID (different from Raft node id) -> lastApplied map
 	sessionMap map[string]*lastApplied
 
+	// serverID for debugging process
+	serverID string
+
 	mu sync.RWMutex
 }
 
-func NewFSMManager() *FSMManager {
+func NewFSMManager(sID string) *FSMManager {
 	return &FSMManager{
 		kvmap:      make(map[string]string),
 		sessionMap: make(map[string]*lastApplied),
+		serverID:   sID,
 	}
 }
 
@@ -108,11 +112,11 @@ func (f *FSMManager) HandleSet(key string, value string, clientId string, seqNo 
 	sesh, ok := f.sessionMap[clientId]
 
 	if ok && sesh.sequenceNo >= seqNo {
-		fmt.Printf("Incoming SeqNo: %d, Found in session store SeqNo: %d\n", seqNo, sesh.sequenceNo)
+		fmt.Printf("[%s] Incoming SeqNo: %d, Found in session store SeqNo: %d\n", f.serverID, seqNo, sesh.sequenceNo)
 		return sesh.lastResult
 	}
 
-	fmt.Printf("Incoming SeqNo: %d, not found in session store. Serving Fresh!\n", seqNo)
+	fmt.Printf("[%s] Incoming SeqNo: %d, not found in session store. Serving Fresh!\n", f.serverID, seqNo)
 
 	if !ok {
 		f.sessionMap[clientId] = &lastApplied{}
