@@ -356,6 +356,18 @@ func (r *RaftNode) commitEntries() {
 		//If majority has been reached, commit the entry
 		if r.hasMajority(count) {
 			r.commitIndex = i
+			if r.log.entries[i].entryType == CONFIG_OP {
+				configuration, err := decodeConfiguration(r.log.entries[i].Data)
+				if err != nil {
+					r.logger.Log("Error while decoding configuration: %v", err.Error())
+					continue
+				}
+				// If the configuration is already committed, skip
+				if r.commitedConfig != nil && configuration.Index <= r.commitedConfig.LogIndex {
+					continue
+				}
+				r.commitedConfig = configuration.toProto()
+			}
 			r.logger.Log("CommitIndex updated to %d", i)
 			anyCommit = true
 		}
@@ -394,21 +406,9 @@ func (r *RaftNode) applyEntries() {
 
 		switch entry.entryType {
 		case CONFIG_OP:
-			configuration, err := decodeConfiguration(entry.Data)
-			if err != nil {
-				r.logger.Log("Error while decoding configuration: %v", err.Error())
-				continue
-			}
-			// If the configuration is already committed, skip
-			if r.commitedConfig != nil && configuration.Index <= r.commitedConfig.LogIndex {
-				return
-			}
-			// Transition to new configuration
-			r.nextConfiguration(&configuration)
-
-			r.commitedConfig = configuration.toProto()
-			respond(r.configManager.pendingReplicated[entry.Index], protoToConfiguration(r.config), nil)
-
+			responseCh := r.configManager.pendingReplicated[entry.Index]
+			delete(r.configManager.pendingReplicated, entry.Index)
+			respond(responseCh, protoToConfiguration(r.config), nil)
 		case NORMAL_OP:
 			responseCh := r.operationManager.pendingReplicated[entry.Index]
 			delete(r.operationManager.pendingReplicated, entry.Index)
@@ -1016,6 +1016,20 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 			})
 
 			mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.SeqNo, entry.ClientID, mongodb.LogEntryType(entry.EntryType))
+		}
+
+		if LogEntryType(entry.EntryType) == CONFIG_OP {
+			configuration, err := decodeConfiguration(entry.Data)
+			if err != nil {
+				r.logger.Log("Error while decoding configuration: %v", err.Error())
+				continue
+			}
+			// If the configuration is already committed, skip
+			if r.commitedConfig != nil && configuration.Index <= r.commitedConfig.LogIndex {
+				continue
+			}
+			// Transition to new configuration
+			r.nextConfiguration(&configuration)
 		}
 	}
 
