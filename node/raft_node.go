@@ -403,12 +403,8 @@ func (r *RaftNode) applyEntries() {
 			if r.commitedConfig != nil && configuration.Index <= r.commitedConfig.LogIndex {
 				return
 			}
-			// Transition to new configuration
-			r.nextConfiguration(&configuration)
-
 			r.commitedConfig = configuration.toProto()
-			respond(r.configManager.pendingReplicated[entry.Index], protoToConfiguration(r.config), nil)
-
+			respond(r.configManager.pendingReplicated[entry.Index], configuration, nil)
 		case NORMAL_OP:
 			responseCh := r.operationManager.pendingReplicated[entry.Index]
 			delete(r.operationManager.pendingReplicated, entry.Index)
@@ -1016,6 +1012,20 @@ func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.A
 			})
 
 			mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.SeqNo, entry.ClientID, mongodb.LogEntryType(entry.EntryType))
+		}
+
+		if LogEntryType(entry.EntryType) == CONFIG_OP {
+			configuration, err := decodeConfiguration(entry.Data)
+			if err != nil {
+				r.logger.Log("Error while decoding configuration: %v", err.Error())
+				continue
+			}
+			// If the configuration is already committed, skip
+			if r.commitedConfig != nil && configuration.Index <= r.commitedConfig.LogIndex {
+				continue
+			}
+			// Transition to new configuration
+			r.nextConfiguration(&configuration)
 		}
 	}
 
