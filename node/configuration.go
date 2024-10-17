@@ -64,7 +64,7 @@ func (c *Configuration) toProto() *pb.Configuration {
 func (c *Configuration) String() string {
 	var builder strings.Builder
 
-	builder.WriteString(fmt.Sprintf("logIndex: %d members: ", c.Index))
+	builder.WriteString(fmt.Sprintf("logIndex: %d members: ", c.Index, c.Members))
 	return fmt.Sprintf("{%s}", strings.TrimSuffix(builder.String(), ","))
 }
 

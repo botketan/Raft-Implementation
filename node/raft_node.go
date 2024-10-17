@@ -29,7 +29,7 @@ const (
 )
 
 const (
-	electionTimeout  = time.Duration(600 * time.Millisecond)
+	electionTimeout  = time.Duration(300 * time.Millisecond)
 	heartbeatTimeout = time.Duration(50 * time.Millisecond)
 )
 
@@ -92,7 +92,13 @@ type LogEntry struct {
 }
 
 func (e LogEntry) String() string {
-	return fmt.Sprintf("Index: %d, Term: %d, Data: %s, SeqNo: %d, clientID: %s, operationType: %s", e.Index, e.Term, string(e.Data), e.seqNo, e.clientID, e.entryType)
+	switch e.entryType {
+	case CONFIG_OP:
+		data, _ := decodeConfiguration(e.Data)
+		return fmt.Sprintf("Index: %d, Term: %d, Data: %v, SeqNo: %d, clientID: %s, operationType: %s", e.Index, e.Term, data, e.seqNo, e.clientID, e.entryType)
+	default:
+		return fmt.Sprintf("Index: %d, Term: %d, Data: %s, SeqNo: %d, clientID: %s, operationType: %s", e.Index, e.Term, string(e.Data), e.seqNo, e.clientID, e.entryType)
+	}
 }
 
 type Log struct {
@@ -163,6 +169,7 @@ func InitRaftNode(ID string, address string, config *pb.Configuration, fsm fsm.F
 		commitIndex:      -1,
 		lastApplied:      -1,
 		config:           config,
+		commitedConfig:   config,
 		votedFor:         "",
 		log:              &Log{}, // Initialize log to prevent nil pointer dereference
 		operationManager: newOperationManager(),
@@ -226,7 +233,9 @@ func (r *RaftNode) restoreStates() error {
 	var lastConfig = &pb.Configuration{}
 	for _, entry := range r.log.entries {
 		if entry.entryType == CONFIG_OP {
-			penultimateConfig = lastConfig
+			// Deep copy the lastConfig into penultimateConfig
+			penultimateConfig = proto.Clone(lastConfig).(*pb.Configuration)
+
 			err := proto.Unmarshal(entry.Data, lastConfig)
 			if err != nil {
 				r.logger.Log("Error while un-marshalling: %v", err.Error())
@@ -440,27 +449,30 @@ func (r *RaftNode) applyEntries() {
 // appendConfiguration sets the log index associated with the
 // configuration and appends it to the log. to be used inside a threadsafe function
 func (r *RaftNode) appendConfiguration(configuration *Configuration) {
+	configuration.Index = r.log.entries[len(r.log.entries)-1].Index + 1
 	data, err := encodeConfiguration(configuration)
 	if err != nil {
 		r.logger.Log("failed to encode configuration: error = %v", err)
 	}
-	entry := LogEntry{Index: configuration.Index, Term: r.currentTerm, Data: data, seqNo: 0, clientID: "", entryType: CONFIG_OP}
+
+	entry := LogEntry{Index: r.log.entries[len(r.log.entries)-1].Index + 1, Term: r.currentTerm, Data: data, seqNo: 0, clientID: "", entryType: CONFIG_OP}
+
 	r.log.entries = append(r.log.entries, entry)
+
 	error := mongodb.AddLog(*r.mongoClient, r.id, entry.Term, entry.Index, entry.Data, entry.seqNo, entry.clientID, mongodb.LogEntryType(entry.entryType))
 	if error != nil {
 		r.logger.Log("failed to add configuration to log: error = %v", error)
 	}
-	configuration.Index = r.log.entries[len(r.log.entries)-1].Index + 1
 }
 
 // nextConfiguration transitions this node from its current configuration to
 // to the provided configuration.
 func (r *RaftNode) nextConfiguration(next *Configuration) {
-	r.logger.Log("transitioning to new configuration: configuration = %s", next.String())
-
 	defer func() {
 		r.config = next.toProto()
 	}()
+
+	r.logger.Log("transitioning to new configuration: configuration = %s", next.String())
 
 	// Step down if this node is being removed and it is the leader.
 	if _, ok := next.Members[r.id]; !ok {
@@ -546,28 +558,33 @@ func (r *RaftNode) AddServer(
 	// If its not a leader, return closed response.
 	if r.state != Leader {
 		respond(configurationFuture.responseCh, Configuration{}, fmt.Errorf("node not a leader"))
+		r.logger.Log("Rejecting AddServer RPC : node not a leader")
 		return configurationFuture
 	}
 
 	// Membership changes may not be submitted until a log entry for this term is committed.
 	if !r.committedThisTerm() {
 		respond(configurationFuture.responseCh, Configuration{}, fmt.Errorf("no committed log entry for this term"))
+		r.logger.Log("Rejecting AddServer RPC : no committed log Entry of term %v", r.currentTerm)
 		return configurationFuture
 	}
 
 	// The membership change is still pending - wait until it completes.
 	if r.pendingConfigurationChange() {
 		respond(configurationFuture.responseCh, Configuration{}, fmt.Errorf("pending configuration change"))
+		r.logger.Log("Rejecting AddServer RPC : pending config change committedConf: %v, config: %v", r.commitedConfig.String(), r.config.String())
+		fmt.Printf("\nCommitedConfig: %v, config: %v\n", r.commitedConfig, r.config)
 		return configurationFuture
 	}
 
 	// The provided node is already a part of the cluster.
 	if r.isMember(id) {
 		respond(configurationFuture.responseCh, config, nil)
+		r.logger.Log("AddServer RPC: Node already a part of config")
 		return configurationFuture
 	}
 
-	// Create the configuration that includes the new node as a non-voter.
+	// Create the configuration that includes the new node.
 	newConfiguration := config.Clone()
 	newConfiguration.Members[id] = address
 
@@ -1127,6 +1144,7 @@ func (r *RaftNode) Start() error {
 	r.node.registerRequestVoteHandler(r.RequestVoteHandler)
 	r.node.registerAppendEntriesHandler(r.AppendEntriesHandler)
 	r.node.registerSubmitOperationHandler(r.SubmitOperationHandler)
+	r.node.registerAddServerHandler(r.AddServerHandler)
 
 	// Initalise the followers list
 	for id := range r.config.Members {

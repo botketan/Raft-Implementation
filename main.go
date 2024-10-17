@@ -13,6 +13,7 @@ import (
 
 func main() {
 
+	// There are four servers but first 3 don't know about the fourth one, should be added with addServer RPC
 	config := &pb.Configuration{
 		Members: map[string]string{
 			"1": "localhost:8000",
@@ -35,9 +36,25 @@ func main() {
 		panic(err)
 	}
 
+	configNew := &pb.Configuration{
+		Members: map[string]string{
+			"1": "localhost:8000",
+			"2": "localhost:8005",
+			"3": "localhost:8021",
+			"4": "localhost:8023",
+		},
+		LogIndex: -1,
+	}
+
+	raft4, err := r.InitRaftNode("4", "localhost:8023", configNew, fsm.NewFSMManager("4"))
+	if err != nil {
+		panic(err)
+	}
+
 	err = raft1.Start()
 	err = raft2.Start()
 	err = raft3.Start()
+	err = raft4.Start()
 
 	// Client 1
 	cl, err := client.NewRaftClient("client1", map[string]string{
