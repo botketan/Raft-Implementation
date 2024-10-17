@@ -501,8 +501,12 @@ func (r *RaftNode) stepdown() {
 func (r *RaftNode) AddServerHandler(req *pb.AddServerRequest, resp *pb.AddServerResponse) error {
 	r.logger.Log("Received Add Server Request: %v", req.String())
 
+	r.mu.Lock()
+	currState := r.state
+	r.mu.Unlock()
+
 	// Only the leader can make membership changes.
-	if r.state != Leader {
+	if currState != Leader {
 		resp.Status = "NOT_LEADER"
 		resp.LeaderHint = r.leaderId
 		return nil
@@ -538,6 +542,12 @@ func (r *RaftNode) AddServer(
 
 	configurationFuture := newFuture[Configuration](timeout)
 	config := protoToConfiguration(r.config)
+
+	// If its not a leader, return closed response.
+	if r.state != Leader {
+		respond(configurationFuture.responseCh, Configuration{}, fmt.Errorf("node not a leader"))
+		return configurationFuture
+	}
 
 	// Membership changes may not be submitted until a log entry for this term is committed.
 	if !r.committedThisTerm() {
@@ -592,7 +602,11 @@ func (r *RaftNode) SubmitOperationHandler(req *pb.SubmitOperationRequest, resp *
 
 	r.logger.Log("Received Submit Operation from Client : %v", req.String())
 
-	if r.state != Leader {
+	r.mu.Lock()
+	currState := r.state
+	r.mu.Unlock()
+
+	if currState != Leader {
 		resp.Success = false
 		if r.leaderId != "" {
 			resp.Message = "REDIRECT " + r.leaderId
