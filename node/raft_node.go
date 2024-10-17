@@ -375,7 +375,7 @@ func (r *RaftNode) commitEntries() {
 				if r.commitedConfig != nil && configuration.Index <= r.commitedConfig.LogIndex {
 					continue
 				}
-				r.commitedConfig = configuration.toProto()
+				r.commitedConfig = configuration.ToProto()
 			}
 			r.logger.Log("CommitIndex updated to %d", i)
 			anyCommit = true
@@ -469,7 +469,7 @@ func (r *RaftNode) appendConfiguration(configuration *Configuration) {
 // to the provided configuration.
 func (r *RaftNode) nextConfiguration(next *Configuration) {
 	defer func() {
-		r.config = next.toProto()
+		r.config = next.ToProto()
 	}()
 
 	r.logger.Log("transitioning to new configuration: configuration = %s", next.String())
@@ -591,7 +591,7 @@ func (r *RaftNode) AddServer(
 	// Add the configuration to the log.
 	r.appendConfiguration(&newConfiguration)
 
-	r.config = newConfiguration.toProto()
+	r.config = newConfiguration.ToProto()
 	r.followersList[id] = &followerState{nextIndex: 0, matchIndex: -1}
 
 	r.configManager.pendingReplicated[newConfiguration.Index] = configurationFuture.responseCh
