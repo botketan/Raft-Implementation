@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 )
 
 func setupRaftNode() *node.RaftNode {
@@ -270,4 +271,16 @@ func TestAppendEntriesDeleteConflictingEntries(t *testing.T) {
 	assert.Equal(t, 3, len(entries), "Log should have 3 entries")
 	assert.Equal(t, []byte("new entry2"), entries[1].Data, "Conflicting entry should be deleted")
 	assert.Equal(t, []byte("new entry3"), entries[2].Data, "New entry should be appended")
+}
+
+func TestConfigurations(t *testing.T) {
+	config := node.NewConfiguration(25, map[string]string{
+		"1": "localhost:5002",
+		"2": "localhost:5004",
+	})
+	checkerConfig := &pb.Configuration{
+		Members:  config.Members,
+		LogIndex: 25,
+	}
+	assert.Equal(t, proto.Equal(config.ToProto(), checkerConfig), true, "Both protos should match")
 }

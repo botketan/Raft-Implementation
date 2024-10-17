@@ -52,8 +52,8 @@ func protoToConfiguration(pbConfiguration *pb.Configuration) Configuration {
 	return configuration
 }
 
-// toProto converts the configuration to a protobuf message.
-func (c *Configuration) toProto() *pb.Configuration {
+// ToProto converts the configuration to a protobuf message.
+func (c *Configuration) ToProto() *pb.Configuration {
 	return &pb.Configuration{
 		Members:  c.Members,
 		LogIndex: c.Index,
