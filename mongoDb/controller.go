@@ -66,3 +66,26 @@ func TrimLog(client mongo.Client, NodeId string, logindex int64) error {
 			"$slice": bson.A{"$log_entry", logindex}}}}})
 	return err
 }
+
+func GetClient(client mongo.Client, ClientId string) Client {
+	db := client.Database("raft")
+	Collection := db.Collection("Client")
+	ct := Collection.FindOne(context.Background(), bson.M{
+		"client_id": ClientId,
+	})
+	var ret Client
+	ct.Decode(&ret)
+	return ret
+}
+
+func UpdateClient(client mongo.Client, ClientId string, seqNo int64) error {
+	db := client.Database("raft")
+	Collection := db.Collection("Client")
+	_, err := Collection.UpdateOne(context.Background(), bson.M{
+		"client_id": ClientId,
+	},
+		bson.M{
+			"seq_no": seqNo,
+		}, options.Update().SetUpsert(true))
+	return err
+}

@@ -6,10 +6,17 @@ import (
 	"os/signal"
 	"raft/client"
 	"raft/fsm"
+	mongodb "raft/mongoDb"
 	r "raft/node"
 	pb "raft/protos"
 	"syscall"
 )
+
+func test() {
+	db, _ := mongodb.Connect()
+	ct := mongodb.GetClient(*db, "hi")
+	fmt.Println(ct)
+}
 
 func main() {
 
@@ -22,7 +29,7 @@ func main() {
 		},
 		LogIndex: -1,
 	}
-
+	test()
 	raft1, err := r.InitRaftNode("1", "localhost:8000", config, fsm.NewFSMManager("1"))
 	if err != nil {
 		panic(err)

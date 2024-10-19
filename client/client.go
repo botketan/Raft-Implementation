@@ -3,11 +3,13 @@ package client
 import (
 	"context"
 	"fmt"
+	mongodb "raft/mongoDb"
 	lgr "raft/node"
 	pb "raft/protos" // Protobuf definitions for Raft
 	"strings"
 	"time"
 
+	"go.mongodb.org/mongo-driver/mongo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -20,6 +22,7 @@ type RaftClient struct {
 	raftNodes   map[string]string        // Map of all known Raft node addresses
 	clientsList map[string]pb.RaftClient // Map of client connections to Raft node
 	logger      lgr.Logger
+	mongoClient *mongo.Client
 }
 
 // NewRaftClient creates a new RaftClient with a unique clientID and list of node addresses.
@@ -35,14 +38,29 @@ func NewRaftClient(clientID string, nodes map[string]string) (*RaftClient, error
 	}
 	var clientState = lgr.Client
 	logger, _ := lgr.NewLogger(clientID, &clientState)
+	mclient, err := mongodb.Connect()
+	if err != nil {
+		fmt.Print("Error connecting to mongo :")
+		fmt.Println(err)
+	}
+	ct := mongodb.GetClient(*mclient, clientID)
+	seqNo := 1
+	if ct.SeqNo > 0 {
+		seqNo = int(ct.SeqNo)
+	}
 	return &RaftClient{
 		clientID:    clientID,
-		seqNo:       1, // Initialize sequence number to 1
+		seqNo:       int64(seqNo), // Initialize sequence number to 1
 		raftNodes:   nodes,
 		leaderID:    "", // Initially, the leader is unknown
 		clientsList: clients,
 		logger:      logger,
+		mongoClient: mclient,
 	}, nil
+}
+
+func (client *RaftClient) UpdateSeq() error {
+	return mongodb.UpdateClient(*client.mongoClient, client.clientID, client.seqNo)
 }
 
 // SubmitOperation submits an operation to the Raft cluster with a clientID and seqNo.
@@ -50,6 +68,10 @@ func (client *RaftClient) SubmitOperation(op []byte, timeout time.Duration) (str
 	defer func() {
 		// Increase sequence number after every successful response
 		client.seqNo++
+		err := client.UpdateSeq()
+		if err != nil {
+			client.logger.Log("Error in Mongo :%v", err)
+		}
 	}()
 
 	var err error

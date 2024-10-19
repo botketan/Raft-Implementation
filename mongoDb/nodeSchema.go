@@ -44,3 +44,8 @@ const (
 	NORMAL_OP LogEntryType = 0
 	CONFIG    LogEntryType = 1
 )
+
+type Client struct {
+	ClientId string `bson:"client_id,omitempty"`
+	SeqNo    int64  `bson:"seq_no,omitempty"`
+}
