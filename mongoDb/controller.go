@@ -85,7 +85,9 @@ func UpdateClient(client mongo.Client, ClientId string, seqNo int64) error {
 		"client_id": ClientId,
 	},
 		bson.M{
-			"seq_no": seqNo,
+			"$set": bson.M{
+				"seq_no": seqNo,
+			},
 		}, options.Update().SetUpsert(true))
 	return err
 }
