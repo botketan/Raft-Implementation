@@ -2,24 +2,18 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"raft/client"
 	"raft/fsm"
-	mongodb "raft/mongoDb"
 	r "raft/node"
 	pb "raft/protos"
 	"syscall"
+	"time"
 )
 
-func test() {
-	db, _ := mongodb.Connect()
-	ct := mongodb.GetClient(*db, "hi")
-	fmt.Println(ct)
-}
-
 func main() {
-
 	// There are four servers but first 3 don't know about the fourth one, should be added with addServer RPC
 	config := &pb.Configuration{
 		Members: map[string]string{
@@ -29,7 +23,6 @@ func main() {
 		},
 		LogIndex: -1,
 	}
-	test()
 	raft1, err := r.InitRaftNode("1", "localhost:8000", config, fsm.NewFSMManager("1"))
 	if err != nil {
 		panic(err)
@@ -49,6 +42,7 @@ func main() {
 			"2": "localhost:8005",
 			"3": "localhost:8021",
 			"4": "localhost:8023",
+			"5": "localhost:8024",
 		},
 		LogIndex: -1,
 	}
@@ -58,16 +52,24 @@ func main() {
 		panic(err)
 	}
 
+	raft5, err := r.InitRaftNode("5", "localhost:8024", configNew, fsm.NewFSMManager("5"))
+	if err != nil {
+		panic(err)
+	}
+
 	err = raft1.Start()
 	err = raft2.Start()
 	err = raft3.Start()
 	err = raft4.Start()
+	err = raft5.Start()
 
 	// Client 1
 	cl, err := client.NewRaftClient("client1", map[string]string{
 		"1": "localhost:8000",
 		"2": "localhost:8005",
 		"3": "localhost:8021",
+		"4": "localhost:8023",
+		"5": "localhost:8024",
 	})
 
 	if err != nil {
@@ -75,6 +77,26 @@ func main() {
 	}
 
 	go func() {
+		client.SimulateClientCommands(cl)
+		<-time.After(5 * time.Second)
+		log.Println("Shutting down the leader")
+		raftNodes := map[string]*r.RaftNode{
+			"1": raft1,
+			"2": raft2,
+			"3": raft3,
+			"4": raft4,
+			"5": raft5,
+		}
+
+		for id := range configNew.GetMembers() {
+			if node, exists := raftNodes[id]; exists {
+				if node.GetState().String() == "Leader" {
+					node.Shutdown()
+					break
+				}
+			}
+		}
+		<-time.After(10 * time.Second)
 		client.SimulateClientCommands(cl)
 	}()
 

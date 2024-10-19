@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
-	mongodb "raft/mongoDb"
+	mongodb "raft/mongodb"
 	lgr "raft/node"
 	pb "raft/protos" // Protobuf definitions for Raft
 	"strings"
@@ -151,19 +151,33 @@ func SimulateClientCommands(client *RaftClient) {
 	} else {
 		client.logger.Log("Response for GET X : %v\n\n", resp)
 	}
-	resp, err = client.SubmitOperation([]byte("SET X 5"), 2*time.Minute)
+	resp, err = client.SubmitOperation([]byte("SET Y 9"), 2*time.Minute)
 	if err != nil {
-		client.logger.Log("Error for SET X: %v\n\n", err)
+		client.logger.Log("Error for SET Y 9: %v\n\n", err)
 	} else {
-		client.logger.Log("Response for SET X: %v\n\n", resp)
+		client.logger.Log("Response for SET Y 9: %v\n\n", resp)
 	}
 	<-time.After(time.Second * 1)
+	resp, err = client.SubmitOperation([]byte("GET Y"), 2*time.Minute)
+	if err != nil {
+		client.logger.Log("Error for GET Y: %v\n\n", err)
+	} else {
+		client.logger.Log("Response for GET Y: %v\n\n", resp)
+	}
 	resp, err = client.SubmitOperation([]byte("GET X"), 2*time.Minute)
 	if err != nil {
 		client.logger.Log("Error for GET X: %v\n\n", err)
 	} else {
 		client.logger.Log("Response for GET X: %v\n\n", resp)
 	}
+	<-time.After(time.Second * 6)
+	resp, err = client.SubmitOperation([]byte("SET X new_val"), 2*time.Minute)
+	if err != nil {
+		client.logger.Log("Error for SET X new_val: %v\n\n", err)
+	} else {
+		client.logger.Log("Response for SET X new_val: %v\n\n", resp)
+	}
+	<-time.After(time.Second * 10)
 	resp, err = client.SubmitOperation([]byte("GET X"), 2*time.Minute)
 	if err != nil {
 		client.logger.Log("Error for GET X: %v\n\n", err)

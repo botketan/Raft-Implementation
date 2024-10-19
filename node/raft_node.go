@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	fsm "raft/fsm"
-	mongodb "raft/mongoDb"
+	mongodb "raft/mongodb"
 	pb "raft/protos"
 	"sync"
 	"time"
@@ -804,6 +804,11 @@ func (r *RaftNode) RequestVoteHandler(req *pb.RequestVoteRequest, resp *pb.Reque
 		return fmt.Errorf("node is in dead state, can't reply to RequestVote RPC")
 	}
 
+	if !r.isMember(req.GetCandidateId()) {
+		r.logger.Log("Received RequestVote RPC from candidate %s not in config, rejecting it", req.GetCandidateId())
+		return nil
+	}
+
 	r.logger.Log("Received RequestVote RPC from candiate: %s", req.GetCandidateId())
 
 	resp.Term = int64(r.currentTerm)
@@ -961,6 +966,10 @@ func (r *RaftNode) sendAppendEntries(id string, addr string, respRcd *int) {
 func (r *RaftNode) AppendEntriesHandler(req *pb.AppendEntriesRequest, resp *pb.AppendEntriesResponse) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.state == Dead {
+		return fmt.Errorf("node is in dead state, cant reply to AppendEntries")
+	}
 
 	// If the leader's term is less than our current term, reject the request
 	if req.Term < r.currentTerm {
@@ -1166,6 +1175,27 @@ func (r *RaftNode) Start() error {
 	r.logger.Log("Server is started")
 
 	return nil
+}
+
+func (r *RaftNode) Shutdown() {
+	r.mu.Lock()
+	if r.state == Dead {
+		r.mu.Unlock()
+		return
+	}
+
+	r.state = Dead
+	r.commitCond.Broadcast()
+	r.applyCond.Broadcast()
+	r.electionCond.Broadcast()
+	r.heartbeatCond.Broadcast()
+
+	r.mu.Unlock()
+
+	// Shutdown RPC server
+	r.node.Shutdown()
+	r.logger.Log("Node %s is Shutdown", r.id)
+	return
 }
 
 // saveStateToDB saves the current state of the node to the database
