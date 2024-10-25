@@ -418,6 +418,7 @@ func (r *RaftNode) applyEntries() {
 			responseCh := r.configManager.pendingReplicated[entry.Index]
 			delete(r.configManager.pendingReplicated, entry.Index)
 			respond(responseCh, protoToConfiguration(r.config), nil)
+			r.commitedConfig = r.config
 			r.logger.Log("Applied config entry: %s", entry)
 		case NORMAL_OP:
 			responseCh := r.operationManager.pendingReplicated[entry.Index]
