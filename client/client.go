@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
-	mongodb "raft/mongodb"
+	mongodb "raft/mongoDb"
 	lgr "raft/node"
 	pb "raft/protos" // Protobuf definitions for Raft
 	"strings"

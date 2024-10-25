@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	fsm "raft/fsm"
-	mongodb "raft/mongodb"
+	mongodb "raft/mongoDb"
 	pb "raft/protos"
 	"sync"
 	"time"
@@ -540,7 +540,32 @@ func (r *RaftNode) AddServerHandler(req *pb.AddServerRequest, resp *pb.AddServer
 
 // Remove server RPC handler
 func (r *RaftNode) RemoveServerHandler(req *pb.RemoveServerRequest, resp *pb.RemoveServerResponse) error {
-	return fmt.Errorf("not implemented")
+	r.logger.Log("Received Remove Server Request: %v", req.String())
+
+	r.mu.Lock()
+	currState := r.state
+	r.mu.Unlock()
+
+	// Only the leader can make membership changes.
+	if currState != Leader {
+		resp.Status = "NOT_LEADER"
+		resp.LeaderHint = r.leaderId
+		return nil
+	}
+
+	future := r.RemoveServer(req.GetNodeId(), req.GetAddress(), 500*time.Millisecond)
+	configuration := future.Await()
+
+	if configuration.Error() != nil {
+		resp.Status = configuration.Error().Error()
+		resp.LeaderHint = r.leaderId
+		return nil
+	}
+
+	resp.Status = "OK"
+	resp.LeaderHint = r.leaderId
+	return nil
+
 }
 
 // Add a new server to the configuration
@@ -573,7 +598,6 @@ func (r *RaftNode) AddServer(
 	if r.pendingConfigurationChange() {
 		respond(configurationFuture.responseCh, Configuration{}, fmt.Errorf("pending configuration change"))
 		r.logger.Log("Rejecting AddServer RPC : pending config change committedConf: %v, config: %v", r.commitedConfig.String(), r.config.String())
-		fmt.Printf("\nCommitedConfig: %v, config: %v\n", r.commitedConfig, r.config)
 		return configurationFuture
 	}
 
@@ -606,6 +630,76 @@ func (r *RaftNode) AddServer(
 
 	r.logger.Log(
 		"request to add node submitted: id = %s, address = %s, logIndex = %d",
+		id,
+		address,
+		newConfiguration.Index,
+	)
+
+	return configurationFuture
+}
+
+// Remove a server to the configuration
+func (r *RaftNode) RemoveServer(
+	id string,
+	address string,
+	timeout time.Duration,
+) Future[Configuration] {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	configurationFuture := newFuture[Configuration](timeout)
+	config := protoToConfiguration(r.config)
+
+	// If its not a leader, return closed response.
+	if r.state != Leader {
+		respond(configurationFuture.responseCh, Configuration{}, fmt.Errorf("node not a leader"))
+		r.logger.Log("Rejecting RemoveServer RPC : node not a leader")
+		return configurationFuture
+	}
+
+	// Membership changes may not be submitted until a log entry for this term is committed.
+	if !r.committedThisTerm() {
+		respond(configurationFuture.responseCh, Configuration{}, fmt.Errorf("no committed log entry for this term"))
+		r.logger.Log("Rejecting RemoveServer RPC : no committed log Entry of term %v", r.currentTerm)
+		return configurationFuture
+	}
+
+	// The membership change is still pending - wait until it completes.
+	if r.pendingConfigurationChange() {
+		respond(configurationFuture.responseCh, Configuration{}, fmt.Errorf("pending configuration change"))
+		r.logger.Log("Rejecting RemoveServer RPC : pending config change committedConf: %v, config: %v", r.commitedConfig.String(), r.config.String())
+		return configurationFuture
+	}
+
+	// The provided node is already a part of the cluster.
+	if !r.isMember(id) {
+		respond(configurationFuture.responseCh, config, nil)
+		r.logger.Log("AddRemovServer RPC: Node already removed")
+		return configurationFuture
+	}
+
+	// Create the configuration that doesnt include this node
+	newConfiguration := config.Clone()
+	delete(newConfiguration.Members, id)
+
+	// Add the configuration to the log.
+	r.appendConfiguration(&newConfiguration)
+
+	r.config = newConfiguration.ToProto()
+	delete(r.followersList, id)
+
+	r.configManager.pendingReplicated[newConfiguration.Index] = configurationFuture.responseCh
+
+	// Send AppendEntries RPCs to all nodes to replicate the configuration change.
+	responsesRcd := 1
+	for id, addr := range r.config.Members {
+		if id != r.id {
+			go r.sendAppendEntries(id, addr, &responsesRcd)
+		}
+	}
+
+	r.logger.Log(
+		"request to remove node submitted: id = %s, address = %s, logIndex = %d",
 		id,
 		address,
 		newConfiguration.Index,
@@ -1154,6 +1248,7 @@ func (r *RaftNode) Start() error {
 	r.node.registerAppendEntriesHandler(r.AppendEntriesHandler)
 	r.node.registerSubmitOperationHandler(r.SubmitOperationHandler)
 	r.node.registerAddServerHandler(r.AddServerHandler)
+	r.node.registerRemoveServerHandler(r.RemoveServerHandler)
 
 	// Initalise the followers list
 	for id := range r.config.Members {

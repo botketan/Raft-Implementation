@@ -1,4 +1,4 @@
-package mongodb
+package mongoDb
 
 import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
