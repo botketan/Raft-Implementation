@@ -417,8 +417,15 @@ func (r *RaftNode) applyEntries() {
 		case CONFIG_OP:
 			responseCh := r.configManager.pendingReplicated[entry.Index]
 			delete(r.configManager.pendingReplicated, entry.Index)
+			// If this node was removed from the config entry and its
+			// a leader, stepdown
+			structConfig, _ := decodeConfiguration(entry.Data)
 			respond(responseCh, protoToConfiguration(r.config), nil)
 			r.commitedConfig = r.config
+			_, ok := structConfig.Members[r.id]
+			if !ok && r.state == Leader {
+				r.stepdown()
+			}
 			r.logger.Log("Applied config entry: %s", entry)
 		case NORMAL_OP:
 			responseCh := r.operationManager.pendingReplicated[entry.Index]
