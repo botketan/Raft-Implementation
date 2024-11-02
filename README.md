@@ -4,7 +4,7 @@ CS 542 : Topics in Distributed systems Course Term Project
 - Dhanesh V - 210101117
 - Ketan Singh - 210101118
 - Shivam Agrawal - 210101119
-## Things implemented so far
+## Things implemented 
 - Leader Election after Election Timeout
 - Log Replication and Committing
 - Log Application to StateMachines
@@ -12,10 +12,7 @@ CS 542 : Topics in Distributed systems Course Term Project
 - State persistence using MongoDB as stable storage
 - RPCs are implemented using `gRPC` framework
 - Prevote phase to aid in disruptive servers in case of partition.
-### TODO
-- Extend this to a Database (`sqlite`) using Database client
 - Add and Remove Server RPCs
-
 #### Note
 For compiling protos, 
 ```
